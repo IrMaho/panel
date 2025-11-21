@@ -1,6 +1,6 @@
 # ======================================================================
 #  🚀 گردش کار نهایی، کامل و جامع گیت‌هاب برای پروژه فلاتر
-#  معماری چندمرحله‌ای، اصلاح شده برای رفع خطای YAML Syntax
+#  معماری چندمرحله‌ای، اصلاح شده: رفع باگ تغییر اشتباه sdk: flutter
 # ======================================================================
 name: 🐦 Build, Deploy & Optimize Flutter App
 
@@ -56,12 +56,12 @@ jobs:
       - name: '📥 Checkout Repository'
         uses: actions/checkout@v4
       
-      # --- FIX START: اصلاح خطای سینتکس YAML (اضافه کردن کوتیشن) ---
-      - name: '🔧 Auto-Fix pubspec.yaml SDK Constraint'
+      # --- FIX START: اصلاح دقیق نسخه بدون خراب کردن sdk: flutter ---
+      - name: '🔧 Smart Auto-Fix pubspec.yaml'
         run: |
-          # این دستور کل خط sdk را با فرمت صحیح و داخل کوتیشن جایگزین می‌کند
-          sed -i "s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
-          echo "✅ Pubspec constraint patched to: sdk: '>=3.0.0 <4.0.0'"
+          # فقط خطوطی که sdk دارند ولی کلمه flutter در آنها نیست را تغییر بده
+          sed -i "/flutter/! s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
+          echo "✅ Pubspec environment SDK patched safely."
           cat pubspec.yaml | grep sdk
       # --- FIX END ---
 
@@ -168,11 +168,12 @@ jobs:
       - name: '📥 Checkout Repository'
         uses: actions/checkout@v4
       
-      # --- FIX START: اصلاح خطای نسخه برای macOS (سینتکس sed متفاوت) ---
-      - name: '🔧 Auto-Fix pubspec.yaml SDK Constraint'
+      # --- FIX START: نسخه macOS دستور sed ---
+      - name: '🔧 Smart Auto-Fix pubspec.yaml'
         run: |
-          sed -i '' "s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
-          echo "✅ Pubspec constraint patched."
+          # دستور sed در مک نیاز به ساختار خاصی دارد، اینجا شرط نقیض استفاده شده
+          sed -i '' "/flutter/! s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
+          echo "✅ Pubspec environment SDK patched safely."
       # --- FIX END ---
 
       - name: '🐦 Restore Flutter from Cache'
@@ -222,12 +223,18 @@ jobs:
       - name: '📥 Checkout Repository'
         uses: actions/checkout@v4
       
-      # --- FIX START: اصلاح خطای نسخه برای Windows PowerShell ---
-      - name: '🔧 Auto-Fix pubspec.yaml SDK Constraint'
+      # --- FIX START: اسکریپت پاورشل برای تعویض هوشمند ---
+      - name: '🔧 Smart Auto-Fix pubspec.yaml'
         shell: powershell
         run: |
           if (Test-Path pubspec.yaml) {
-            (Get-Content pubspec.yaml) -replace 'sdk: .*', "sdk: '>=3.0.0 <4.0.0'" | Set-Content pubspec.yaml
+            (Get-Content pubspec.yaml) | ForEach-Object { 
+              if ($_ -match "sdk:" -and $_ -notmatch "flutter") { 
+                "  sdk: '>=3.0.0 <4.0.0'" 
+              } else { 
+                $_ 
+              } 
+            } | Set-Content pubspec.yaml
             Write-Host "✅ Pubspec patched successfully."
           }
       # --- FIX END ---
@@ -277,9 +284,9 @@ jobs:
         uses: actions/checkout@v4
       
       # --- FIX START ---
-      - name: '🔧 Auto-Fix pubspec.yaml SDK Constraint'
+      - name: '🔧 Smart Auto-Fix pubspec.yaml'
         run: |
-          sed -i "s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
+          sed -i "/flutter/! s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
           echo "✅ Pubspec patched."
       # --- FIX END ---
 
@@ -323,9 +330,9 @@ jobs:
         uses: actions/checkout@v4
 
       # --- FIX START ---
-      - name: '🔧 Auto-Fix pubspec.yaml SDK Constraint'
+      - name: '🔧 Smart Auto-Fix pubspec.yaml'
         run: |
-          sed -i "s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
+          sed -i "/flutter/! s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
           echo "✅ Pubspec patched."
       # --- FIX END ---
 
