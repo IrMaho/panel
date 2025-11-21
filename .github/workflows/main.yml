@@ -1,6 +1,6 @@
 # ======================================================================
 #  🚀 گردش کار نهایی، کامل و جامع گیت‌هاب برای پروژه فلاتر
-#  معماری چندمرحله‌ای، اصلاح شده: رفع باگ تغییر اشتباه sdk: flutter
+#  معماری چندمرحله‌ای، اصلاح شده: حذف dependency_overrides مزاحم
 # ======================================================================
 name: 🐦 Build, Deploy & Optimize Flutter App
 
@@ -56,13 +56,17 @@ jobs:
       - name: '📥 Checkout Repository'
         uses: actions/checkout@v4
       
-      # --- FIX START: اصلاح دقیق نسخه بدون خراب کردن sdk: flutter ---
+      # --- FIX START: اصلاح نسخه SDK و حذف Override مزاحم ---
       - name: '🔧 Smart Auto-Fix pubspec.yaml'
         run: |
-          # فقط خطوطی که sdk دارند ولی کلمه flutter در آنها نیست را تغییر بده
+          # 1. اصلاح نسخه SDK بدون خراب کردن sdk: flutter
           sed -i "/flutter/! s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
-          echo "✅ Pubspec environment SDK patched safely."
-          cat pubspec.yaml | grep sdk
+          
+          # 2. حذف Override قدیمی analyzer که با فلاتر جدید تداخل دارد
+          sed -i '/analyzer: \^9.0.0/d' pubspec.yaml
+          
+          echo "✅ Pubspec patched: SDK fixed & Analyzer override removed."
+          cat pubspec.yaml | grep -E "sdk:|analyzer:" || true
       # --- FIX END ---
 
       - name: '🐦 Restore Flutter from Cache'
@@ -171,9 +175,10 @@ jobs:
       # --- FIX START: نسخه macOS دستور sed ---
       - name: '🔧 Smart Auto-Fix pubspec.yaml'
         run: |
-          # دستور sed در مک نیاز به ساختار خاصی دارد، اینجا شرط نقیض استفاده شده
           sed -i '' "/flutter/! s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
-          echo "✅ Pubspec environment SDK patched safely."
+          # حذف Override مزاحم در macOS
+          sed -i '' '/analyzer: \^9.0.0/d' pubspec.yaml
+          echo "✅ Pubspec patched: SDK fixed & Analyzer override removed."
       # --- FIX END ---
 
       - name: '🐦 Restore Flutter from Cache'
@@ -223,14 +228,17 @@ jobs:
       - name: '📥 Checkout Repository'
         uses: actions/checkout@v4
       
-      # --- FIX START: اسکریپت پاورشل برای تعویض هوشمند ---
+      # --- FIX START: اسکریپت پاورشل برای حذف هوشمند Override ---
       - name: '🔧 Smart Auto-Fix pubspec.yaml'
         shell: powershell
         run: |
           if (Test-Path pubspec.yaml) {
+            # 1. Fix SDK Version
             (Get-Content pubspec.yaml) | ForEach-Object { 
               if ($_ -match "sdk:" -and $_ -notmatch "flutter") { 
                 "  sdk: '>=3.0.0 <4.0.0'" 
+              } elseif ($_ -match "analyzer: \^9.0.0") {
+                # 2. Remove Analyzer Override (by skipping the line)
               } else { 
                 $_ 
               } 
@@ -287,6 +295,7 @@ jobs:
       - name: '🔧 Smart Auto-Fix pubspec.yaml'
         run: |
           sed -i "/flutter/! s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
+          sed -i '/analyzer: \^9.0.0/d' pubspec.yaml
           echo "✅ Pubspec patched."
       # --- FIX END ---
 
@@ -333,6 +342,7 @@ jobs:
       - name: '🔧 Smart Auto-Fix pubspec.yaml'
         run: |
           sed -i "/flutter/! s/sdk: .*/sdk: '>=3.0.0 <4.0.0'/g" pubspec.yaml
+          sed -i '/analyzer: \^9.0.0/d' pubspec.yaml
           echo "✅ Pubspec patched."
       # --- FIX END ---
 
