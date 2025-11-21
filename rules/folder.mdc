@@ -1,0 +1,392 @@
+📁 Folder Structure & File Organization
+🎯 Naming Conventions
+Files
+Format: snake_case
+dart✅ user_profile_cubit.dart
+✅ create_user_request.dart
+✅ user_repository_impl.dart
+
+❌ UserProfileCubit.dart      // PascalCase
+❌ user-profile-cubit.dart    // kebab-case
+❌ userProfileCubit.dart      // camelCase
+Classes
+Format: PascalCase
+dart✅ class UserProfileCubit extends Cubit<UserProfileState> {}
+✅ class CreateUserRequest {}
+✅ class UserRepositoryImpl implements UserRepository {}
+
+❌ class userProfileCubit {}   // camelCase
+❌ class user_profile_cubit {} // snake_case
+Variables & Parameters
+Format: camelCase
+dart✅ final String firstName;
+✅ void updateUser(String userId) {}
+✅ final UserRepository userRepository;
+
+❌ final String FirstName;     // PascalCase
+❌ final String first_name;    // snake_case
+Constants
+Format: snake_case (screaming for global constants, camelCase for local)
+dart✅ const API_BASE_URL = 'https://api.example.com';
+✅ const MAX_RETRY_COUNT = 3;
+✅ const defaultTimeout = Duration(seconds: 30);
+
+❌ const ApiBaseUrl = '...';   // PascalCase
+❌ const apiBaseUrl = '...';   // camelCase (for global)
+Folders
+Format: snake_case
+✅ user_profile/
+✅ create_order/
+✅ payment_gateway/
+
+❌ UserProfile/      // PascalCase
+❌ user-profile/     // kebab-case
+
+🗂️ Complete Folder Structure
+lib/
+├── core/                                    # Shared infrastructure
+│   ├── model/                               # Core models & utilities
+│   │   ├── network/                         # Network layer
+│   │   │   ├── network_service.dart         # Abstract interface
+│   │   │   ├── dio_network_service.dart     # Dio implementation
+│   │   │   ├── network_exception.dart       # Custom exceptions
+│   │   │   └── network_interceptor.dart     # Logging, auth headers
+│   │   │
+│   │   ├── storage/                         # Local storage
+│   │   │   ├── storage_service.dart         # Abstract interface
+│   │   │   └── hive_storage_service.dart    # Hive implementation
+│   │   │
+│   │   ├── validation/                      # Form validation
+│   │   │   ├── validator.dart               # Base validator
+│   │   │   ├── email_validator.dart
+│   │   │   └── password_validator.dart
+│   │   │
+│   │   └── result.dart                      # Result<T> pattern
+│   │
+│   ├── view/                                # Shared UI
+│   │   └── widgets/                         # Global widgets
+│   │       ├── app_button.dart
+│   │       ├── app_text_field.dart
+│   │       ├── app_loading_indicator.dart
+│   │       ├── app_error_widget.dart
+│   │       └── widgets.dart                 # Barrel export
+│   │
+│   ├── di/                                  # Dependency injection
+│   │   ├── service_locator.dart             # Main DI setup
+│   │   └── firebase_di.dart                 # Firebase-specific DI
+│   │
+│   ├── router.dart                          # go_router configuration
+│   ├── theme.dart                           # Material theme
+│   └── constants.dart                       # App-wide constants
+│
+├── features/                                # Business features
+│   ├── auth/                                # Example feature
+│   │   ├── auth_di.dart                     # Feature DI registration
+│   │   │
+│   │   ├── bloc/                            # State management
+│   │   │   ├── auth_cubit.dart
+│   │   │   └── auth_state.dart
+│   │   │
+│   │   ├── model/                           # Data layer
+│   │   │   ├── data/                        # DTOs
+│   │   │   │   ├── user.dart
+│   │   │   │   ├── user.g.dart
+│   │   │   │   ├── login_request.dart
+│   │   │   │   ├── register_request.dart
+│   │   │   │   └── auth_token.dart
+│   │   │   │
+│   │   │   ├── repositories/                # Data access
+│   │   │   │   ├── auth_repository.dart     # Abstract
+│   │   │   │   └── auth_repository_impl.dart
+│   │   │   │
+│   │   │   └── usecases/                    # Complex logic (optional)
+│   │   │       └── validate_and_login_usecase.dart
+│   │   │
+│   │   └── view/                            # UI layer
+│   │       ├── login_page.dart              # Page (route)
+│   │       ├── register_page.dart
+│   │       │
+│   │       ├── views/                       # Composite sections
+│   │       │   ├── login_form_view.dart
+│   │       │   ├── social_login_view.dart
+│   │       │   └── views.dart               # Barrel export
+│   │       │
+│   │       └── widgets/                     # Feature widgets
+│   │           ├── password_field.dart
+│   │           ├── login_button.dart
+│   │           └── widgets.dart             # Barrel export
+│   │
+│   ├── home/                                # Another feature
+│   │   ├── home_di.dart
+│   │   ├── bloc/
+│   │   ├── model/
+│   │   └── view/
+│   │
+│   └── profile/                             # Another feature
+│       ├── profile_di.dart
+│       ├── bloc/
+│       ├── model/
+│       └── view/
+│
+└── main.dart                                # App entry point
+
+test/                                        # Mirror lib/ structure
+├── core/
+│   └── model/
+│       └── network/
+│           └── network_service_test.dart
+│
+└── features/
+    └── auth/
+        ├── bloc/
+        │   ├── auth_cubit_test.dart
+        │   └── auth_cubit_test.mocks.dart
+        └── model/
+            └── repositories/
+                ├── auth_repository_impl_test.dart
+                └── auth_repository_impl_test.mocks.dart
+
+📂 Feature Structure Template
+When creating a new feature, use this structure:
+features/
+└── {feature_name}/
+    ├── {feature_name}_di.dart           # DI registration
+    │
+    ├── bloc/                            # State management
+    │   ├── {feature}_cubit.dart
+    │   └── {feature}_state.dart
+    │
+    ├── model/                           # Data layer
+    │   ├── data/                        # DTOs/Entities
+    │   │   ├── {entity}.dart
+    │   │   ├── {entity}.g.dart
+    │   │   ├── create_{entity}_request.dart
+    │   │   └── update_{entity}_request.dart
+    │   │
+    │   ├── repositories/                # Data access
+    │   │   ├── {entity}_repository.dart
+    │   │   └── {entity}_repository_impl.dart
+    │   │
+    │   └── usecases/                    # Complex logic (optional)
+    │       └── {usecase_name}.dart
+    │
+    └── view/                            # UI layer
+        ├── {feature}_page.dart          # Main page
+        │
+        ├── views/                       # Layout sections
+        │   ├── {section}_view.dart
+        │   └── views.dart               # Barrel export
+        │
+        └── widgets/                     # Reusable widgets
+            ├── {widget}_widget.dart
+            └── widgets.dart             # Barrel export
+
+📋 File Naming Patterns
+Cubit/Bloc Files
+✅ user_profile_cubit.dart       // Cubit implementation
+✅ user_profile_state.dart       // State definition
+✅ order_processing_bloc.dart    // Bloc (if needed)
+✅ order_processing_event.dart   // Bloc events
+Repository Files
+✅ user_repository.dart          // Abstract interface
+✅ user_repository_impl.dart     // Implementation
+✅ user_firebase_repository.dart // Firebase-specific impl
+✅ user_api_repository.dart      // REST API impl
+Model/DTO Files
+✅ user.dart                     // Main entity
+✅ user.g.dart                   // Generated JSON code
+✅ create_user_request.dart      // Request DTO
+✅ update_user_request.dart      // Request DTO
+✅ user_response.dart            // Response DTO
+UseCase Files
+✅ validate_and_login_usecase.dart
+✅ process_payment_usecase.dart
+✅ sync_offline_data_usecase.dart
+Page Files
+✅ user_profile_page.dart
+✅ login_page.dart
+✅ product_details_page.dart
+View Files
+✅ user_profile_content_view.dart
+✅ user_profile_header_view.dart
+✅ login_form_view.dart
+Widget Files
+✅ user_card_widget.dart
+✅ product_list_item.dart
+✅ custom_button.dart
+
+🎯 File Separation Principles
+Single Responsibility
+Each file should contain ONE main concept
+dart✅ GOOD: Separate files
+// user_cubit.dart
+class UserCubit extends Cubit<UserState> { }
+
+// user_state.dart
+class UserState extends Equatable { }
+
+❌ BAD: Combined in one file
+// user_cubit.dart
+class UserCubit extends Cubit<UserState> { }
+class UserState extends Equatable { }  // Should be separate
+No God Files
+Split large files by responsibility
+dart❌ BAD: 2000+ line file
+// user_service.dart
+class UserService {
+  void login() { /* 100 lines */ }
+  void register() { /* 100 lines */ }
+  void updateProfile() { /* 100 lines */ }
+  void changePassword() { /* 100 lines */ }
+  void deleteAccount() { /* 100 lines */ }
+  // ... 20 more methods
+}
+
+✅ GOOD: Split by responsibility
+// auth_repository.dart
+class AuthRepository {
+  Future<Result<void>> login() { }
+  Future<Result<void>> register() { }
+}
+
+// profile_repository.dart
+class ProfileRepository {
+  Future<Result<void>> updateProfile() { }
+  Future<Result<void>> changePassword() { }
+  Future<Result<void>> deleteAccount() { }
+}
+Abstraction Naming
+Don't prefix interfaces with "I"
+dart✅ GOOD
+abstract class NetworkService { }
+class DioNetworkService implements NetworkService { }
+
+❌ BAD
+abstract class INetworkService { }
+class NetworkService implements INetworkService { }
+
+📦 Barrel Files (Exports)
+Purpose
+Clean imports by exporting all related files from a single entry point.
+Structure
+dart// features/auth/view/widgets/widgets.dart
+export 'login_button.dart';
+export 'password_field.dart';
+export 'social_login_buttons.dart';
+export 'terms_checkbox.dart';
+
+// features/auth/view/views/views.dart
+export 'login_form_view.dart';
+export 'social_login_view.dart';
+export 'register_form_view.dart';
+
+// core/view/widgets/widgets.dart
+export 'app_button.dart';
+export 'app_text_field.dart';
+export 'app_loading_indicator.dart';
+export 'app_error_widget.dart';
+Usage
+dart// ✅ Clean import using barrel file
+import 'package:app/features/auth/view/widgets/widgets.dart';
+
+// Now you can use all widgets
+LoginButton()
+PasswordField()
+SocialLoginButtons()
+
+// ❌ Without barrel file (messy)
+import 'package:app/features/auth/view/widgets/login_button.dart';
+import 'package:app/features/auth/view/widgets/password_field.dart';
+import 'package:app/features/auth/view/widgets/social_login_buttons.dart';
+When to Create Barrel Files
+
+✅ Multiple related widgets in same folder
+✅ Multiple views in same folder
+✅ Multiple models/DTOs in same folder
+❌ Single file in folder (no need)
+
+
+🚫 Anti-Patterns
+❌ Mixing Concerns in One Folder
+❌ BAD:
+lib/
+└── features/
+    └── user/
+        ├── user_page.dart          // UI
+        ├── user_cubit.dart         // State management
+        ├── user_repository.dart    // Data access
+        └── user.dart               // Model
+        // All mixed together!
+
+✅ GOOD:
+lib/
+└── features/
+    └── user/
+        ├── bloc/
+        │   ├── user_cubit.dart
+        │   └── user_state.dart
+        ├── model/
+        │   ├── data/
+        │   │   └── user.dart
+        │   └── repositories/
+        │       └── user_repository.dart
+        └── view/
+            └── user_page.dart
+❌ Deep Nesting
+❌ BAD: Too many levels
+lib/features/user/view/pages/main/profile/widgets/
+
+✅ GOOD: Keep it flat
+lib/features/user/view/widgets/
+❌ Inconsistent Naming
+❌ BAD:
+user_profile_cubit.dart
+UserRepository.dart        // Mixed case
+user-api-service.dart      // Kebab case
+
+✅ GOOD:
+user_profile_cubit.dart
+user_repository.dart
+user_api_service.dart
+
+📐 File Size Guidelines
+Recommended Sizes
+
+Cubit: 100-300 lines
+Repository: 100-400 lines
+Page: 50-150 lines
+View: 100-250 lines
+Widget: 50-150 lines
+
+When to Split
+If a file exceeds these guidelines:
+
+Extract helper methods to separate files
+Split complex widgets into smaller ones
+Create separate view files for different sections
+Consider if the class has too many responsibilities
+
+
+✅ Folder Structure Checklist
+When creating a new feature:
+
+ Create {feature}_di.dart for DI registration
+ Create bloc/ folder with Cubit and State
+ Create model/data/ for DTOs with JsonSerializable
+ Create model/repositories/ with abstract and implementation
+ Create view/ with page, views, and widgets folders
+ Create barrel files (widgets.dart, views.dart) for exports
+ Register dependencies in {feature}_di.dart
+ Add feature DI setup call in core/di/service_locator.dart
+
+
+🎓 Key Principles
+
+Feature-First: Organize by feature, not by layer
+Single Responsibility: One concept per file
+Consistent Naming: Always use snake_case for files
+Flat Structure: Avoid deep nesting
+Barrel Files: Clean exports for related files
+Clear Separation: Each folder has a clear purpose
+
+Follow these conventions strictly for consistency across the entire codebase.

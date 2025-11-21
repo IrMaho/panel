@@ -1,0 +1,612 @@
+# 🎛️ State Management Standards
+
+## 🎯 Cubit vs Bloc Decision
+
+### Default Choice: Cubit
+Use **Cubit** for 95% of cases. It's simpler and sufficient for most scenarios.
+
+### When to Use Bloc
+Only use **Bloc** when you need:
+- ✅ Complex event transformations (debounce, throttle)
+- ✅ Stream operators (switchMap, exhaustMap)
+- ✅ Event buffering
+- ✅ Very complex state machines
+
+---
+
+## 📊 Cubit Implementation
+
+### Basic Cubit Structure
+
+```dart
+// features/users/bloc/users_cubit.dart
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:equatable/equatable.dart';
+
+part 'users_state.dart';
+
+class UsersCubit extends Cubit<UsersState> {
+  final UserRepository _repository;
+  
+  // ✅ CORRECT: Constructor with dependency injection
+  UsersCubit(this._repository) : super(const UsersState.initial());
+  
+  // ✅ For multiple dependencies, use named parameters
+  UsersCubit({
+    required UserRepository repository,
+    required AnalyticsService analytics,
+  })  : _repository = repository,
+        _analytics = analytics,
+        super(const UsersState.initial());
+  
+  // Public methods that trigger state changes
+  Future<void> loadUsers() async {
+    emit(state.copyWith(isLoading: true));
+    
+    final result = await _repository.getUsers();
+    
+    switch (result) {
+      case Success(:final data):
+        emit(state.copyWith(
+          isLoading: false,
+          users: data,
+          status: UsersStatus.success,
+        ));
+      case Failure(:final message):
+        emit(state.copyWith(
+          isLoading: false,
+          status: UsersStatus.error,
+          error: message,
+        ));
+    }
+  }
+  
+  Future<void> deleteUser(String userId) async {
+    final result = await _repository.deleteUser(userId);
+    
+    switch (result) {
+      case Success():
+        final updatedUsers = state.users.where((u) => u.id != userId).toList();
+        emit(state.copyWith(users: updatedUsers));
+      case Failure(:final message):
+        emit(state.copyWith(error: message));
+    }
+  }
+}
+```
+
+---
+
+## 🏗️ State Definition Patterns
+
+### Pattern 1: Complex State with Multiple Properties
+**Use when**: You have multiple properties that change together
+
+```dart
+// features/users/bloc/users_state.dart
+enum UsersStatus { init, loading, success, error }
+
+class UsersState extends Equatable {
+  final bool isLoading;
+  final UsersStatus status;
+  final List<User> users;
+  final String? error;
+  final User? selectedUser;
+  
+  const UsersState({
+    this.isLoading = false,
+    this.status = UsersStatus.init,
+    this.users = const [],
+    this.error,
+    this.selectedUser,
+  });
+  
+  // Factory constructor for initial state
+  const UsersState.initial()
+      : isLoading = false,
+        status = UsersStatus.init,
+        users = const [],
+        error = null,
+        selectedUser = null;
+  
+  @override
+  List<Object?> get props => [isLoading, status, users, error, selectedUser];
+  
+  // copyWith for immutable updates
+  UsersState copyWith({
+    bool? isLoading,
+    UsersStatus? status,
+    List<User>? users,
+    String? error,
+    User? selectedUser,
+  }) {
+    return UsersState(
+      isLoading: isLoading ?? this.isLoading,
+      status: status ?? this.status,
+      users: users ?? this.users,
+      error: error ?? this.error,
+      selectedUser: selectedUser ?? this.selectedUser,
+    );
+  }
+}
+```
+
+### Pattern 2: Sealed Class for Distinct States
+**Use when**: States are mutually exclusive (loading XOR success XOR error)
+
+```dart
+// features/counter/bloc/counter_state.dart
+sealed class CounterState {}
+
+final class CounterInitial extends CounterState {}
+
+final class CounterLoading extends CounterState {}
+
+final class CounterSuccess extends CounterState {
+  final int value;
+  CounterSuccess(this.value);
+}
+
+final class CounterError extends CounterState {
+  final String message;
+  CounterError(this.message);
+}
+
+// Usage in Cubit
+class CounterCubit extends Cubit<CounterState> {
+  CounterCubit() : super(CounterInitial());
+  
+  void increment() {
+    if (state is CounterSuccess) {
+      final currentValue = (state as CounterSuccess).value;
+      emit(CounterSuccess(currentValue + 1));
+    } else {
+      emit(CounterSuccess(1));
+    }
+  }
+}
+
+// Usage in UI
+BlocBuilder<CounterCubit, CounterState>(
+  builder: (context, state) {
+    return switch (state) {
+      CounterInitial() => const Text('Press button to start'),
+      CounterLoading() => const CircularProgressIndicator(),
+      CounterSuccess(:final value) => Text('Count: $value'),
+      CounterError(:final message) => Text('Error: $message'),
+    };
+  },
+)
+```
+
+### Pattern 3: Simple Primitive State
+**Use when**: State is a single value that changes
+
+```dart
+// features/counter/bloc/counter_cubit.dart
+class CounterCubit extends Cubit<int> {
+  CounterCubit() : super(0);
+  
+  void increment() => emit(state + 1);
+  void decrement() => emit(state - 1);
+  void reset() => emit(0);
+}
+
+// Usage in UI
+BlocBuilder<CounterCubit, int>(
+  builder: (context, count) {
+    return Text('Count: $count');
+  },
+)
+```
+
+---
+
+## 🎨 State Decision Tree
+
+```
+Do you have multiple properties that change together?
+├─ YES → Use Equatable class with copyWith (Pattern 1)
+└─ NO ↓
+
+Are the states mutually exclusive?
+├─ YES → Use sealed class (Pattern 2)
+└─ NO ↓
+
+Is state a single primitive value?
+├─ YES → Use primitive type directly (Pattern 3)
+└─ NO → Use Equatable class (Pattern 1)
+```
+
+---
+
+## 🔄 Error Handling Mixin
+
+### Error Mixin Implementation
+
+```dart
+// core/bloc/error_handling_mixin.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:toastification/toastification.dart';
+
+mixin ErrorHandlingMixin<T> on Cubit<T> {
+  // Global navigator key (defined in main.dart)
+  final navigatorKey = GlobalKey<NavigatorState>();
+  
+  void handleError(
+    String errorMessage, {
+    VoidCallback? onError,
+  }) {
+    toastification.show(
+      context: navigatorKey.currentContext!,
+      type: ToastificationType.error,
+      title: Text(errorMessage),
+      autoCloseDuration: const Duration(seconds: 3),
+      showProgressBar: true,
+    );
+    
+    onError?.call();
+  }
+  
+  void showSuccess(String message) {
+    toastification.show(
+      context: navigatorKey.currentContext!,
+      type: ToastificationType.success,
+      title: Text(message),
+      autoCloseDuration: const Duration(seconds: 2),
+    );
+  }
+  
+  Future<void> executeWithErrorHandling<R>(
+    Future<Result<R>> Function() operation,
+    void Function(R data) onSuccess,
+  ) async {
+    final result = await operation();
+    
+    switch (result) {
+      case Success(:final data):
+        onSuccess(data);
+      case Failure(:final message):
+        handleError(message);
+    }
+  }
+}
+```
+
+### Using Error Mixin
+
+```dart
+// features/users/bloc/users_cubit.dart
+class UsersCubit extends Cubit<UsersState> 
+    with ErrorHandlingMixin<UsersState> {
+  final UserRepository _repository;
+  
+  UsersCubit(this._repository) : super(const UsersState.initial());
+  
+  // Method 1: Manual error handling
+  Future<void> loadUsers() async {
+    emit(state.copyWith(isLoading: true));
+    
+    final result = await _repository.getUsers();
+    
+    switch (result) {
+      case Success(:final data):
+        emit(state.copyWith(
+          isLoading: false,
+          users: data,
+          status: UsersStatus.success,
+        ));
+        showSuccess('Users loaded successfully');
+      case Failure(:final message):
+        handleError(message);
+        emit(state.copyWith(
+          isLoading: false,
+          status: UsersStatus.error,
+        ));
+    }
+  }
+  
+  // Method 2: Using executeWithErrorHandling helper
+  Future<void> deleteUser(String userId) async {
+    await executeWithErrorHandling(
+      () => _repository.deleteUser(userId),
+      (_) {
+        final updatedUsers = state.users.where((u) => u.id != userId).toList();
+        emit(state.copyWith(users: updatedUsers));
+        showSuccess('User deleted successfully');
+      },
+    );
+  }
+}
+```
+
+---
+
+## 🔄 Stream Management Mixin
+
+### Stream Mixin Implementation
+
+```dart
+// core/bloc/stream_mixin.dart
+import 'dart:async';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+mixin StreamMixin<T, S> on Cubit<S> {
+  StreamSubscription<T>? _subscription;
+  
+  void listenToStream(
+    Stream<T> stream,
+    void Function(T data) onData, {
+    void Function(Object error)? onError,
+  }) {
+    // Cancel existing subscription
+    _subscription?.cancel();
+    
+    // Create new subscription
+    _subscription = stream.listen(
+      onData,
+      onError: onError ?? (error) {
+        // Default error handling
+        print('Stream error: $error');
+      },
+    );
+  }
+  
+  void cancelStream() {
+    _subscription?.cancel();
+    _subscription = null;
+  }
+  
+  @override
+  Future<void> close() {
+    _subscription?.cancel();
+    return super.close();
+  }
+}
+```
+
+### Using Stream Mixin (Firebase Real-time)
+
+```dart
+// features/users/bloc/users_cubit.dart
+class UsersCubit extends Cubit<UsersState>
+    with ErrorHandlingMixin<UsersState>, StreamMixin<Result<List<User>>, UsersState> {
+  final UserRepository _repository;
+  
+  UsersCubit(this._repository) : super(const UsersState.initial());
+  
+  // Watch for real-time updates
+  void watchUsers() {
+    emit(state.copyWith(isLoading: true));
+    
+    listenToStream(
+      _repository.watchUsers(),
+      (result) {
+        switch (result) {
+          case Success(:final data):
+            emit(state.copyWith(
+              isLoading: false,
+              users: data,
+              status: UsersStatus.success,
+            ));
+          case Failure(:final message):
+            handleError(message);
+            emit(state.copyWith(
+              isLoading: false,
+              status: UsersStatus.error,
+            ));
+        }
+      },
+      onError: (error) {
+        handleError('Stream error: ${error.toString()}');
+      },
+    );
+  }
+  
+  // Stop watching
+  void stopWatching() {
+    cancelStream();
+  }
+}
+```
+
+---
+
+## 🚫 Anti-Patterns
+
+### ❌ Returning Async Results from Cubit
+```dart
+// ❌ WRONG: Cubit methods should NOT return business data
+class UsersCubit extends Cubit<UsersState> {
+  Future<User?> getUser(String id) async {
+    return await _repository.getUser(id); // ❌ Don't return data
+  }
+}
+
+// ✅ CORRECT: Communicate via state
+class UsersCubit extends Cubit<UsersState> {
+  Future<void> loadUser(String id) async {
+    emit(state.copyWith(isLoading: true));
+    
+    final result = await _repository.getUser(id);
+    
+    switch (result) {
+      case Success(:final data):
+        emit(state.copyWith(user: data, isLoading: false));
+      case Failure(:final message):
+        emit(state.copyWith(error: message, isLoading: false));
+    }
+  }
+}
+```
+
+### ❌ Business Logic in Cubit
+```dart
+// ❌ WRONG: Complex logic in Cubit
+class OrderCubit extends Cubit<OrderState> {
+  Future<void> processOrder(Order order) async {
+    // ❌ Too much logic here
+    final validated = _validateOrder(order);
+    if (!validated) return;
+    
+    final payment = await _processPayment(order);
+    if (payment.failed) return;
+    
+    final inventory = await _updateInventory(order);
+    if (!inventory.success) return;
+    
+    await _sendConfirmation(order);
+  }
+}
+
+// ✅ CORRECT: Delegate to UseCase
+class OrderCubit extends Cubit<OrderState> {
+  final ProcessOrderUseCase _processOrder;
+  
+  Future<void> processOrder(Order order) async {
+    emit(state.copyWith(isProcessing: true));
+    
+    final result = await _processOrder.execute(order);
+    
+    switch (result) {
+      case Success():
+        emit(state.copyWith(isProcessing: false, orderComplete: true));
+      case Failure(:final message):
+        emit(state.copyWith(isProcessing: false, error: message));
+    }
+  }
+}
+```
+
+### ❌ Cubit Depending on Another Cubit
+```dart
+// ❌ WRONG: Direct Cubit dependency
+class UsersCubit extends Cubit<UsersState> {
+  final PostsCubit _postsCubit; // ❌ Don't inject cubits
+  
+  UsersCubit(this._postsCubit);
+}
+
+// ✅ CORRECT: Listen to another Cubit's stream
+class UsersCubit extends Cubit<UsersState> {
+  StreamSubscription<PostsState>? _postsSubscription;
+  
+  void initialize(PostsCubit postsCubit) {
+    _postsSubscription = postsCubit.stream.listen((postsState) {
+      if (postsState.hasNewPost) {
+        loadUsers(); // React to posts changes
+      }
+    });
+  }
+  
+  @override
+  Future<void> close() {
+    _postsSubscription?.cancel();
+    return super.close();
+  }
+}
+```
+
+### ❌ Using Freezed for States
+```dart
+// ❌ WRONG: Using Freezed (not allowed)
+@freezed
+class UsersState with _$UsersState {
+  const factory UsersState({
+    required List<User> users,
+    required bool isLoading,
+  }) = _UsersState;
+}
+
+// ✅ CORRECT: Use Equatable
+class UsersState extends Equatable {
+  final List<User> users;
+  final bool isLoading;
+  
+  const UsersState({
+    this.users = const [],
+    this.isLoading = false,
+  });
+  
+  @override
+  List<Object?> get props => [users, isLoading];
+  
+  UsersState copyWith({
+    List<User>? users,
+    bool? isLoading,
+  }) {
+    return UsersState(
+      users: users ?? this.users,
+      isLoading: isLoading ?? this.isLoading,
+    );
+  }
+}
+```
+
+---
+
+## ✅ Best Practices
+
+### 1. Keep Cubits Thin
+Delegate complex logic to UseCases or services.
+
+### 2. Always Use const for Initial State
+```dart
+✅ UsersCubit(this._repository) : super(const UsersState.initial());
+❌ UsersCubit(this._repository) : super(UsersState.initial());
+```
+
+### 3. Use copyWith for Immutable Updates
+Never mutate state directly.
+
+### 4. Cancel Subscriptions
+Always cancel stream subscriptions in `close()`.
+
+### 5. Error Handling is Cubit's Responsibility
+Don't let errors bubble to the UI layer.
+
+### 6. Synchronous Getters are OK
+```dart
+✅ bool get hasSelectedUser => state.selectedUser != null;
+✅ int get userCount => state.users.length;
+```
+
+---
+
+## 📋 State Management Checklist
+
+When creating a new Cubit:
+- [ ] Use Equatable for state (NOT Freezed)
+- [ ] Add error handling mixin if needed
+- [ ] Add stream mixin if using real-time data
+- [ ] Implement `copyWith` method for state updates
+- [ ] Make initial state const
+- [ ] Cancel subscriptions in `close()`
+- [ ] Keep business logic in repositories/UseCases
+- [ ] Methods return `Future<void>`, not data
+- [ ] Use Result<T> pattern for repository responses
+
+---
+
+## 🎓 Summary
+
+**Cubit Choice**:
+- Use Cubit by default
+- Only use Bloc for complex event handling
+
+**State Pattern**:
+- Complex state with multiple properties → Equatable class
+- Mutually exclusive states → Sealed class
+- Single value → Primitive type
+
+**Error Handling**:
+- Use ErrorHandlingMixin for consistent error UX
+- Show toasts for errors/success messages
+- Cubit is responsible for all error handling
+
+**Streams**:
+- Use StreamMixin for real-time data
+- Always cancel subscriptions in close()
+
+Follow these patterns strictly for consistent state management across all features.

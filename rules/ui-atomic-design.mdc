@@ -1,0 +1,1276 @@
+# 🎛️ State Management Standards
+
+## 🎯 Cubit vs Bloc Decision
+
+### Default Choice: Cubit
+Use **Cubit** for 95% of cases. It's simpler and sufficient for most scenarios.
+
+### When to Use Bloc
+Only use **Bloc** when you need:
+- ✅ Complex event transformations (debounce, throttle)
+- ✅ Stream operators (switchMap, exhaustMap)
+- ✅ Event buffering
+- ✅ Very complex state machines
+
+---
+
+## 📊 Cubit Implementation
+
+### Basic Cubit Structure
+
+```dart
+// features/users/bloc/users_cubit.dart
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:equatable/equatable.dart';
+
+part 'users_state.dart';
+
+class UsersCubit extends Cubit<UsersState> {
+  final UserRepository _repository;
+  
+  // ✅ CORRECT: Constructor with dependency injection
+  UsersCubit(this._repository) : super(const UsersState.initial());
+  
+  // ✅ For multiple dependencies, use named parameters
+  UsersCubit({
+    required UserRepository repository,
+    required AnalyticsService analytics,
+  })  : _repository = repository,
+        _analytics = analytics,
+        super(const UsersState.initial());
+  
+  // Public methods that trigger state changes
+  Future<void> loadUsers() async {
+    emit(state.copyWith(isLoading: true));
+    
+    final result = await _repository.getUsers();
+    
+    switch (result) {
+      case Success(:final data):
+        emit(state.copyWith(
+          isLoading: false,
+          users: data,
+          status: UsersStatus.success,
+        ));
+      case Failure(:final message):
+        emit(state.copyWith(
+          isLoading: false,
+          status: UsersStatus.error,
+          error: message,
+        ));
+    }
+  }
+  
+  Future<void> deleteUser(String userId) async {
+    final result = await _repository.deleteUser(userId);
+    
+    switch (result) {
+      case Success():
+        final updatedUsers = state.users.where((u) => u.id != userId).toList();
+        emit(state.copyWith(users: updatedUsers));
+      case Failure(:final message):
+        emit(state.copyWith(error: message));
+    }
+  }
+}
+```
+
+---
+
+## 🏗️ State Definition Patterns
+
+### Pattern 1: Complex State with Multiple Properties
+**Use when**: You have multiple properties that change together
+
+```dart
+// features/users/bloc/users_state.dart
+enum UsersStatus { init, loading, success, error }
+
+class UsersState extends Equatable {
+  final bool isLoading;
+  final UsersStatus status;
+  final List<User> users;
+  final String? error;
+  final User? selectedUser;
+  
+  const UsersState({
+    this.isLoading = false,
+    this.status = UsersStatus.init,
+    this.users = const [],
+    this.error,
+    this.selectedUser,
+  });
+  
+  // Factory constructor for initial state
+  const UsersState.initial()
+      : isLoading = false,
+        status = UsersStatus.init,
+        users = const [],
+        error = null,
+        selectedUser = null;
+  
+  @override
+  List<Object?> get props => [isLoading, status, users, error, selectedUser];
+  
+  // copyWith for immutable updates
+  UsersState copyWith({
+    bool? isLoading,
+    UsersStatus? status,
+    List<User>? users,
+    String? error,
+    User? selectedUser,
+  }) {
+    return UsersState(
+      isLoading: isLoading ?? this.isLoading,
+      status: status ?? this.status,
+      users: users ?? this.users,
+      error: error ?? this.error,
+      selectedUser: selectedUser ?? this.selectedUser,
+    );
+  }
+}
+```
+
+### Pattern 2: Sealed Class for Distinct States
+**Use when**: States are mutually exclusive (loading XOR success XOR error)
+
+```dart
+// features/counter/bloc/counter_state.dart
+sealed class CounterState {}
+
+final class CounterInitial extends CounterState {}
+
+final class CounterLoading extends CounterState {}
+
+final class CounterSuccess extends CounterState {
+  final int value;
+  CounterSuccess(this.value);
+}
+
+final class CounterError extends CounterState {
+  final String message;
+  CounterError(this.message);
+}
+
+// Usage in Cubit
+class CounterCubit extends Cubit<CounterState> {
+  CounterCubit() : super(CounterInitial());
+  
+  void increment() {
+    if (state is CounterSuccess) {
+      final currentValue = (state as CounterSuccess).value;
+      emit(CounterSuccess(currentValue + 1));
+    } else {
+      emit(CounterSuccess(1));
+    }
+  }
+}
+
+// Usage in UI
+BlocBuilder<CounterCubit, CounterState>(
+  builder: (context, state) {
+    return switch (state) {
+      CounterInitial() => const Text('Press button to start'),
+      CounterLoading() => const CircularProgressIndicator(),
+      CounterSuccess(:final value) => Text('Count: $value'),
+      CounterError(:final message) => Text('Error: $message'),
+    };
+  },
+)
+```
+
+### Pattern 3: Simple Primitive State
+**Use when**: State is a single value that changes
+
+```dart
+// features/counter/bloc/counter_cubit.dart
+class CounterCubit extends Cubit<int> {
+  CounterCubit() : super(0);
+  
+  void increment() => emit(state + 1);
+  void decrement() => emit(state - 1);
+  void reset() => emit(0);
+}
+
+// Usage in UI
+BlocBuilder<CounterCubit, int>(
+  builder: (context, count) {
+    return Text('Count: $count');
+  },
+)
+```
+
+---
+
+## 🎨 State Decision Tree
+
+```
+Do you have multiple properties that change together?
+├─ YES → Use Equatable class with copyWith (Pattern 1)
+└─ NO ↓
+
+Are the states mutually exclusive?
+├─ YES → Use sealed class (Pattern 2)
+└─ NO ↓
+
+Is state a single primitive value?
+├─ YES → Use primitive type directly (Pattern 3)
+└─ NO → Use Equatable class (Pattern 1)
+```
+
+---
+
+## 🔄 Error Handling Mixin
+
+### Error Mixin Implementation
+
+```dart
+// core/bloc/error_handling_mixin.dart
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:toastification/toastification.dart';
+
+mixin ErrorHandlingMixin<T> on Cubit<T> {
+  // Global navigator key (defined in main.dart)
+  final navigatorKey = GlobalKey<NavigatorState>();
+  
+  void handleError(
+    String errorMessage, {
+    VoidCallback? onError,
+  }) {
+    toastification.show(
+      context: navigatorKey.currentContext!,
+      type: ToastificationType.error,
+      title: Text(errorMessage),
+      autoCloseDuration: const Duration(seconds: 3),
+      showProgressBar: true,
+    );
+    
+    onError?.call();
+  }
+  
+  void showSuccess(String message) {
+    toastification.show(
+      context: navigatorKey.currentContext!,
+      type: ToastificationType.success,
+      title: Text(message),
+      autoCloseDuration: const Duration(seconds: 2),
+    );
+  }
+  
+  Future<void> executeWithErrorHandling<R>(
+    Future<Result<R>> Function() operation,
+    void Function(R data) onSuccess,
+  ) async {
+    final result = await operation();
+    
+    switch (result) {
+      case Success(:final data):
+        onSuccess(data);
+      case Failure(:final message):
+        handleError(message);
+    }
+  }
+}
+```
+
+### Using Error Mixin
+
+```dart
+// features/users/bloc/users_cubit.dart
+class UsersCubit extends Cubit<UsersState> 
+    with ErrorHandlingMixin<UsersState> {
+  final UserRepository _repository;
+  
+  UsersCubit(this._repository) : super(const UsersState.initial());
+  
+  // Method 1: Manual error handling
+  Future<void> loadUsers() async {
+    emit(state.copyWith(isLoading: true));
+    
+    final result = await _repository.getUsers();
+    
+    switch (result) {
+      case Success(:final data):
+        emit(state.copyWith(
+          isLoading: false,
+          users: data,
+          status: UsersStatus.success,
+        ));
+        showSuccess('Users loaded successfully');
+      case Failure(:final message):
+        handleError(message);
+        emit(state.copyWith(
+          isLoading: false,
+          status: UsersStatus.error,
+        ));
+    }
+  }
+  
+  // Method 2: Using executeWithErrorHandling helper
+  Future<void> deleteUser(String userId) async {
+    await executeWithErrorHandling(
+      () => _repository.deleteUser(userId),
+      (_) {
+        final updatedUsers = state.users.where((u) => u.id != userId).toList();
+        emit(state.copyWith(users: updatedUsers));
+        showSuccess('User deleted successfully');
+      },
+    );
+  }
+}
+```
+
+---
+
+## 🔄 Stream Management Mixin
+
+### Stream Mixin Implementation
+
+```dart
+// core/bloc/stream_mixin.dart
+import 'dart:async';
+import 'package:flutter_bloc/flutter_bloc.dart';
+
+mixin StreamMixin<T, S> on Cubit<S> {
+  StreamSubscription<T>? _subscription;
+  
+  void listenToStream(
+    Stream<T> stream,
+    void Function(T data) onData, {
+    void Function(Object error)? onError,
+  }) {
+    // Cancel existing subscription
+    _subscription?.cancel();
+    
+    // Create new subscription
+    _subscription = stream.listen(
+      onData,
+      onError: onError ?? (error) {
+        // Default error handling
+        print('Stream error: $error');
+      },
+    );
+  }
+  
+  void cancelStream() {
+    _subscription?.cancel();
+    _subscription = null;
+  }
+  
+  @override
+  Future<void> close() {
+    _subscription?.cancel();
+    return super.close();
+  }
+}
+```
+
+### Using Stream Mixin (Firebase Real-time)
+
+```dart
+// features/users/bloc/users_cubit.dart
+class UsersCubit extends Cubit<UsersState>
+    with ErrorHandlingMixin<UsersState>, StreamMixin<Result<List<User>>, UsersState> {
+  final UserRepository _repository;
+  
+  UsersCubit(this._repository) : super(const UsersState.initial());
+  
+  // Watch for real-time updates
+  void watchUsers() {
+    emit(state.copyWith(isLoading: true));
+    
+    listenToStream(
+      _repository.watchUsers(),
+      (result) {
+        switch (result) {
+          case Success(:final data):
+            emit(state.copyWith(
+              isLoading: false,
+              users: data,
+              status: UsersStatus.success,
+            ));
+          case Failure(:final message):
+            handleError(message);
+            emit(state.copyWith(
+              isLoading: false,
+              status: UsersStatus.error,
+            ));
+        }
+      },
+      onError: (error) {
+        handleError('Stream error: ${error.toString()}');
+      },
+    );
+  }
+  
+  // Stop watching
+  void stopWatching() {
+    cancelStream();
+  }
+}
+```
+
+---
+
+## 🚫 Anti-Patterns
+
+### ❌ Returning Async Results from Cubit
+```dart
+// ❌ WRONG: Cubit methods should NOT return business data
+class UsersCubit extends Cubit<UsersState> {
+  Future<User?> getUser(String id) async {
+    return await _repository.getUser(id); // ❌ Don't return data
+  }
+}
+
+// ✅ CORRECT: Communicate via state
+class UsersCubit extends Cubit<UsersState> {
+  Future<void> loadUser(String id) async {
+    emit(state.copyWith(isLoading: true));
+    
+    final result = await _repository.getUser(id);
+    
+    switch (result) {
+      case Success(:final data):
+        emit(state.copyWith(user: data, isLoading: false));
+      case Failure(:final message):
+        emit(state.copyWith(error: message, isLoading: false));
+    }
+  }
+}
+```
+
+### ❌ Business Logic in Cubit
+```dart
+// ❌ WRONG: Complex logic in Cubit
+class OrderCubit extends Cubit<OrderState> {
+  Future<void> processOrder(Order order) async {
+    // ❌ Too much logic here
+    final validated = _validateOrder(order);
+    if (!validated) return;
+    
+    final payment = await _processPayment(order);
+    if (payment.failed) return;
+    
+    final inventory = await _updateInventory(order);
+    if (!inventory.success) return;
+    
+    await _sendConfirmation(order);
+  }
+}
+
+// ✅ CORRECT: Delegate to UseCase
+class OrderCubit extends Cubit<OrderState> {
+  final ProcessOrderUseCase _processOrder;
+  
+  Future<void> processOrder(Order order) async {
+    emit(state.copyWith(isProcessing: true));
+    
+    final result = await _processOrder.execute(order);
+    
+    switch (result) {
+      case Success():
+        emit(state.copyWith(isProcessing: false, orderComplete: true));
+      case Failure(:final message):
+        emit(state.copyWith(isProcessing: false, error: message));
+    }
+  }
+}
+```
+
+### ❌ Cubit Depending on Another Cubit
+```dart
+// ❌ WRONG: Direct Cubit dependency
+class UsersCubit extends Cubit<UsersState> {
+  final PostsCubit _postsCubit; // ❌ Don't inject cubits
+  
+  UsersCubit(this._postsCubit);
+}
+
+// ✅ CORRECT: Listen to another Cubit's stream
+class UsersCubit extends Cubit<UsersState> {
+  StreamSubscription<PostsState>? _postsSubscription;
+  
+  void initialize(PostsCubit postsCubit) {
+    _postsSubscription = postsCubit.stream.listen((postsState) {
+      if (postsState.hasNewPost) {
+        loadUsers(); // React to posts changes
+      }
+    });
+  }
+  
+  @override
+  Future<void> close() {
+    _postsSubscription?.cancel();
+    return super.close();
+  }
+}
+```
+
+### ❌ Using Freezed for States
+```dart
+// ❌ WRONG: Using Freezed (not allowed)
+@freezed
+class UsersState with _$UsersState {
+  const factory UsersState({
+    required List<User> users,
+    required bool isLoading,
+  }) = _UsersState;
+}
+
+// ✅ CORRECT: Use Equatable
+class UsersState extends Equatable {
+  final List<User> users;
+  final bool isLoading;
+  
+  const UsersState({
+    this.users = const [],
+    this.isLoading = false,
+  });
+  
+  @override
+  List<Object?> get props => [users, isLoading];
+  
+  UsersState copyWith({
+    List<User>? users,
+    bool? isLoading,
+  }) {
+    return UsersState(
+      users: users ?? this.users,
+      isLoading: isLoading ?? this.isLoading,
+    );
+  }
+}
+```
+
+---
+
+## ✅ Best Practices
+
+### 1. Keep Cubits Thin
+Delegate complex logic to UseCases or services.
+
+### 2. Always Use const for Initial State
+```dart
+✅ UsersCubit(this._repository) : super(const UsersState.initial());
+❌ UsersCubit(this._repository) : super(UsersState.initial());
+```
+
+### 3. Use copyWith for Immutable Updates
+Never mutate state directly.
+
+### 4. Cancel Subscriptions
+Always cancel stream subscriptions in `close()`.
+
+### 5. Error Handling is Cubit's Responsibility
+Don't let errors bubble to the UI layer.
+
+### 6. Synchronous Getters are OK
+```dart
+✅ bool get hasSelectedUser => state.selectedUser != null;
+✅ int get userCount => state.users.length;
+```
+
+---
+
+## 📋 State Management Checklist
+
+When creating a new Cubit:
+- [ ] Use Equatable for state (NOT Freezed)
+- [ ] Add error handling mixin if needed
+- [ ] Add stream mixin if using real-time data
+- [ ] Implement `copyWith` method for state updates
+- [ ] Make initial state const
+- [ ] Cancel subscriptions in `close()`
+- [ ] Keep business logic in repositories/UseCases
+- [ ] Methods return `Future<void>`, not data
+- [ ] Use Result<T> pattern for repository responses
+
+---
+
+## 🎓 Summary
+
+**Cubit Choice**:
+- Use Cubit by default
+- Only use Bloc for complex event handling
+
+**State Pattern**:
+- Complex state with multiple properties → Equatable class
+- Mutually exclusive states → Sealed class
+- Single value → Primitive type
+
+**Error Handling**:
+- Use ErrorHandlingMixin for consistent error UX
+- Show toasts for errors/success messages
+- Cubit is responsible for all error handling
+
+**Streams**:
+- Use StreamMixin for real-time data
+- Always cancel subscriptions in close()
+
+Follow these patterns strictly for consistent state management across all features.🎨 UI Architecture - Atomic Design System
+🎯 Three-Tier UI Structure
+This project follows a simplified Atomic Design approach with three tiers:
+Page (Route + DI) → View (Layout) → Widget (Component)
+
+📱 TIER 1: Page
+Purpose
+Top-level route entry point with dependency injection and state management setup.
+Responsibilities
+
+✅ Route definition
+✅ BlocProvider setup with GetIt
+✅ Scaffold structure (AppBar, body, FAB)
+✅ BlocListener for side effects (navigation, toasts, dialogs)
+✅ BlocBuilder delegates rendering to Views
+✅ High-level state routing (loading vs content vs error)
+
+Rules
+
+✅ Max 50-100 lines of code
+❌ NO complex UI composition (delegate to Views)
+❌ NO business logic
+❌ NO styling details
+❌ NO direct widget building (buttons, forms, cards)
+❌ NO BlocBuilder for detailed state (only high-level routing)
+
+Template
+dart// features/users/view/users_page.dart
+class UsersPage extends StatelessWidget {
+  static const routeName = '/users';
+  
+  const UsersPage({super.key});
+  
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      // ✅ Get Cubit from DI and initialize
+      create: (context) => getIt<UsersCubit>()..loadUsers(),
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Users'),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () => context.push('/users/create'),
+            ),
+          ],
+        ),
+        body: BlocConsumer<UsersCubit, UsersState>(
+          // ✅ Listener for side effects only
+          listener: (context, state) {
+            if (state.status == UsersStatus.error) {
+              // Show error toast (handled by ErrorHandlingMixin)
+            }
+            
+            if (state.status == UsersStatus.deleted) {
+              // Navigate or show success
+              toastification.show(
+                context: context,
+                type: ToastificationType.success,
+                title: const Text('User deleted'),
+              );
+            }
+          },
+          // ✅ Builder for high-level state routing
+          builder: (context, state) {
+            if (state.isLoading && state.users.isEmpty) {
+              return const UsersLoadingView();
+            }
+            
+            if (state.status == UsersStatus.error && state.users.isEmpty) {
+              return UsersErrorView(
+                message: state.error ?? 'Failed to load users',
+                onRetry: () => context.read<UsersCubit>().loadUsers(),
+              );
+            }
+            
+            if (state.users.isEmpty) {
+              return const UsersEmptyView();
+            }
+            
+            return const UsersContentView();
+          },
+        ),
+      ),
+    );
+  }
+}
+
+🖼️ TIER 2: View
+Purpose
+Major layout section that composes multiple widgets into a cohesive UI area.
+Responsibilities
+
+✅ Layout composition (Column, Row, ListView, GridView)
+✅ Orchestrate multiple widgets
+✅ BlocBuilder for section-specific state
+✅ Responsive design (MediaQuery, LayoutBuilder)
+✅ Pass data and callbacks to child widgets
+
+Rules
+
+✅ Can use BlocBuilder for detailed state
+❌ NO BlocListener (only in Pages)
+❌ NO business logic
+❌ NO direct Cubit method calls (use callbacks from context.read)
+❌ NO navigation or toasts
+❌ NO BlocConsumer (use BlocBuilder only)
+
+Naming Convention
+{feature}_content_view.dart    # Main content layout
+{feature}_header_view.dart     # Header section
+{feature}_form_view.dart       # Form layout
+{feature}_loading_view.dart    # Loading state
+{feature}_error_view.dart      # Error state
+{feature}_empty_view.dart      # Empty state
+Template
+dart// features/users/view/views/users_content_view.dart
+class UsersContentView extends StatelessWidget {
+  const UsersContentView({super.key});
+  
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<UsersCubit, UsersState>(
+      builder: (context, state) {
+        return Column(
+          children: [
+            // Header widget
+            UsersHeaderWidget(
+              totalCount: state.users.length,
+              selectedCount: state.selectedUsers.length,
+            ),
+            
+            // Search bar widget
+            UsersSearchWidget(
+              onSearch: (query) {
+                context.read<UsersCubit>().searchUsers(query);
+              },
+            ),
+            
+            // List of users
+            Expanded(
+              child: UsersListWidget(
+                users: state.users,
+                onUserTap: (user) {
+                  context.read<UsersCubit>().selectUser(user.id);
+                },
+                onUserDelete: (user) {
+                  context.read<UsersCubit>().deleteUser(user.id);
+                },
+              ),
+            ),
+            
+            // Footer/actions
+            if (state.selectedUsers.isNotEmpty)
+              UsersActionsWidget(
+                selectedCount: state.selectedUsers.length,
+                onDeleteSelected: () {
+                  context.read<UsersCubit>().deleteSelected();
+                },
+                onClearSelection: () {
+                  context.read<UsersCubit>().clearSelection();
+                },
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+Loading View Example
+dart// features/users/view/views/users_loading_view.dart
+class UsersLoadingView extends StatelessWidget {
+  const UsersLoadingView({super.key});
+  
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text('Loading users...'),
+        ],
+      ),
+    );
+  }
+}
+Error View Example
+dart// features/users/view/views/users_error_view.dart
+class UsersErrorView extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  
+  const UsersErrorView({
+    super.key,
+    required this.message,
+    required this.onRetry,
+  });
+  
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const Icon(Icons.error_outline, size: 64, color: Colors.red),
+          const SizedBox(height: 16),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodyLarge,
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+🧩 TIER 3: Widget
+Purpose
+Reusable UI component - single responsibility, composable, testable.
+Responsibilities
+
+✅ Self-contained UI component
+✅ Receive data via constructor parameters
+✅ Receive callbacks via constructor
+✅ Styling and visual logic
+✅ Reusable within the feature
+
+Rules
+
+❌ NO BlocBuilder or BlocListener
+❌ NO context.read<Cubit>() calls
+❌ NO business logic
+❌ NO navigation
+❌ NO state management (StatelessWidget preferred)
+
+Naming Convention
+{feature}_card.dart            # Card component
+{feature}_list_item.dart       # List item
+{feature}_button.dart          # Custom button
+{feature}_form_field.dart      # Form input
+{feature}_header.dart          # Header component
+Template
+dart// features/users/view/widgets/user_card.dart
+class UserCard extends StatelessWidget {
+  final User user;
+  final VoidCallback onTap;
+  final VoidCallback? onDelete;
+  final bool isSelected;
+  
+  const UserCard({
+    super.key,
+    required this.user,
+    required this.onTap,
+    this.onDelete,
+    this.isSelected = false,
+  });
+  
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: isSelected ? Colors.blue.shade50 : null,
+      elevation: isSelected ? 4 : 1,
+      child: ListTile(
+        leading: CircleAvatar(
+          child: Text(user.name[0].toUpperCase()),
+        ),
+        title: Text(user.name),
+        subtitle: Text(user.email),
+        trailing: onDelete != null
+            ? IconButton(
+                icon: const Icon(Icons.delete),
+                onPressed: onDelete,
+              )
+            : null,
+        onTap: onTap,
+      ),
+    );
+  }
+}
+List Widget Example
+dart// features/users/view/widgets/users_list_widget.dart
+class UsersListWidget extends StatelessWidget {
+  final List<User> users;
+  final Function(User) onUserTap;
+  final Function(User)? onUserDelete;
+  
+  const UsersListWidget({
+    super.key,
+    required this.users,
+    required this.onUserTap,
+    this.onUserDelete,
+  });
+  
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      itemCount: users.length,
+      itemBuilder: (context, index) {
+        final user = users[index];
+        return UserCard(
+          user: user,
+          onTap: () => onUserTap(user),
+          onDelete: onUserDelete != null 
+              ? () => onUserDelete!(user) 
+              : null,
+        );
+      },
+    );
+  }
+}
+
+📂 Folder Structure
+features/
+└── {feature}/
+    └── view/
+        ├── {feature}_page.dart           # TIER 1: Page
+        │
+        ├── views/                        # TIER 2: Views
+        │   ├── {feature}_content_view.dart
+        │   ├── {feature}_loading_view.dart
+        │   ├── {feature}_error_view.dart
+        │   ├── {feature}_empty_view.dart
+        │   └── views.dart                # Barrel export
+        │
+        └── widgets/                      # TIER 3: Widgets
+            ├── {feature}_card.dart
+            ├── {feature}_list_item.dart
+            ├── {feature}_header.dart
+            └── widgets.dart              # Barrel export
+
+core/
+└── view/
+    └── widgets/                          # Global widgets
+        ├── app_button.dart
+        ├── app_text_field.dart
+        ├── app_loading.dart
+        └── widgets.dart                  # Barrel export
+
+📦 Barrel Files
+Purpose
+Clean imports by exporting all related files from a single entry point.
+Views Barrel
+dart// features/users/view/views/views.dart
+export 'users_content_view.dart';
+export 'users_loading_view.dart';
+export 'users_error_view.dart';
+export 'users_empty_view.dart';
+Widgets Barrel
+dart// features/users/view/widgets/widgets.dart
+export 'user_card.dart';
+export 'users_list_widget.dart';
+export 'user_header_widget.dart';
+export 'user_search_widget.dart';
+export 'users_actions_widget.dart';
+Usage
+dart// ✅ Clean import with barrel file
+import 'package:app/features/users/view/views/views.dart';
+import 'package:app/features/users/view/widgets/widgets.dart';
+
+// Now use all views and widgets
+UsersContentView()
+UsersLoadingView()
+UserCard()
+UsersListWidget()
+
+// ❌ Without barrel files (messy)
+import 'package:app/features/users/view/views/users_content_view.dart';
+import 'package:app/features/users/view/views/users_loading_view.dart';
+import 'package:app/features/users/view/widgets/user_card.dart';
+import 'package:app/features/users/view/widgets/users_list_widget.dart';
+
+🎨 BlocBuilder Best Practices
+Principle: UI Politeness
+All UI at the same level should use the same pattern for state access.
+✅ CORRECT: Consistent BlocBuilder Usage
+dart// Page level - high-level routing
+class UsersPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (context) => getIt<UsersCubit>()..loadUsers(),
+      child: BlocBuilder<UsersCubit, UsersState>(
+        builder: (context, state) {
+          // High-level routing only
+          if (state.isLoading) return const UsersLoadingView();
+          return const UsersContentView();
+        },
+      ),
+    );
+  }
+}
+
+// View level - all widgets get data via parameters
+class UsersContentView extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<UsersCubit, UsersState>(
+      builder: (context, state) {
+        return Column(
+          children: [
+            // ✅ All widgets receive data via parameters
+            UserHeaderWidget(count: state.users.length),
+            UsersListWidget(users: state.users),
+            UserActionsWidget(selectedCount: state.selectedUsers.length),
+          ],
+        );
+      },
+    );
+  }
+}
+❌ WRONG: Mixed BlocBuilder Patterns
+dart// ❌ BAD: Inconsistent state access
+class UsersContentView extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<UsersCubit, UsersState>(
+      builder: (context, state) {
+        return Column(
+          children: [
+            // ✅ This widget gets data via parameter
+            UserHeaderWidget(count: state.users.length),
+            
+            // ❌ This widget has its own BlocBuilder (inconsistent!)
+            BlocBuilder<UsersCubit, UsersState>(
+              builder: (context, state) {
+                return UsersListWidget(users: state.users);
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+Optimized BlocBuilder with buildWhen
+dart// Only rebuild when specific properties change
+BlocBuilder<UsersCubit, UsersState>(
+  buildWhen: (previous, current) => previous.users != current.users,
+  builder: (context, state) {
+    return UsersListWidget(users: state.users);
+  },
+)
+
+🚫 Anti-Patterns
+❌ Business Logic in Widget
+dart// ❌ WRONG: Direct Cubit access in widget
+class UserCard extends StatelessWidget {
+  final User user;
+  
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        title: Text(user.name),
+        onTap: () {
+          // ❌ WRONG: Direct Cubit call from widget
+          context.read<UsersCubit>().selectUser(user.id);
+        },
+      ),
+    );
+  }
+}
+
+// ✅ CORRECT: Callback from parent
+class UserCard extends StatelessWidget {
+  final User user;
+  final VoidCallback onTap; // ✅ Callback parameter
+  
+  const UserCard({
+    super.key,
+    required this.user,
+    required this.onTap,
+  });
+  
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: ListTile(
+        title: Text(user.name),
+        onTap: onTap, // ✅ Use callback
+      ),
+    );
+  }
+}
+❌ BlocBuilder in Widget Tier
+dart// ❌ WRONG: BlocBuilder in widget
+class UserCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return BlocBuilder<UsersCubit, UsersState>(
+      builder: (context, state) {
+        return Card(...); // ❌ Widget shouldn't access Bloc
+      },
+    );
+  }
+}
+
+// ✅ CORRECT: Data passed via parameters
+class UserCard extends StatelessWidget {
+  final User user;
+  final bool isSelected;
+  
+  const UserCard({
+    required this.user,
+    required this.isSelected,
+  });
+  
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: isSelected ? Colors.blue : null,
+      child: ...,
+    );
+  }
+}
+❌ Deep Widget Tree in Page
+dart// ❌ WRONG: Too much UI in Page
+class UsersPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: BlocBuilder<UsersCubit, UsersState>(
+        builder: (context, state) {
+          return Column(
+            children: [
+              Container(...), // 50 lines
+              ListView.builder(...), // 100 lines
+              Row(...), // 30 lines
+              // ... 200+ lines of UI
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+// ✅ CORRECT: Delegate to View
+class UsersPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: BlocBuilder<UsersCubit, UsersState>(
+        builder: (context, state) {
+          if (state.isLoading) return const UsersLoadingView();
+          return const UsersContentView(); // ✅ Delegate
+        },
+      ),
+    );
+  }
+}
+
+🎯 Decision Tree
+Where Does This Code Go?
+Is this a route entry point?
+├─ YES → Page (TIER 1)
+└─ NO ↓
+
+Does this compose multiple widgets into a layout?
+├─ YES → View (TIER 2)
+└─ NO ↓
+
+Is this a single reusable UI component?
+├─ YES → Widget (TIER 3)
+    ├─ Used across features? → core/view/widgets/
+    └─ Feature-specific? → features/{feature}/view/widgets/
+Should This Widget Access Bloc?
+Is this a Page?
+├─ YES → Can use BlocConsumer (listener + builder)
+└─ NO ↓
+
+Is this a View?
+├─ YES → Can use BlocBuilder only
+└─ NO ↓
+
+Is this a Widget?
+└─ NO → Receive data via parameters, use callbacks
+
+✅ Best Practices
+1. Keep Pages Thin
+Max 50-100 lines, delegate composition to Views.
+2. Views Orchestrate Widgets
+Views arrange widgets but don't implement complex UI.
+3. Widgets Are Pure
+Widgets receive all data via parameters, no Bloc access.
+4. Consistent State Access
+All UI at the same level uses the same pattern.
+5. Use Barrel Files
+Export related files for clean imports.
+6. Responsive Design in Views
+Use MediaQuery and LayoutBuilder in Views, not Pages.
+dartclass UsersContentView extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // Responsive layout based on width
+        if (constraints.maxWidth > 600) {
+          return UsersGridWidget();
+        }
+        return UsersListWidget();
+      },
+    );
+  }
+}
+7. Separation of State Views
+Create dedicated views for different states:
+
+Loading view
+Error view
+Empty view
+Content view
+
+
+📋 UI Checklist
+When creating UI for a feature:
+
+ Create Page with BlocProvider and high-level routing
+ Create Views folder with content/loading/error/empty views
+ Create Widgets folder with reusable components
+ Create barrel files (views.dart, widgets.dart)
+ Use BlocConsumer in Page for side effects
+ Use BlocBuilder in Views for detailed state
+ Pass data to Widgets via parameters (no Bloc access)
+ Keep UI polite (consistent state access pattern)
+ Extract complex widgets to separate files
+
+
+🎓 Summary
+Three Tiers:
+
+Page: Route + DI + High-level state routing
+View: Layout composition + BlocBuilder
+Widget: Reusable component + Parameters only
+
+BlocBuilder Usage:
+
+Page: BlocConsumer for side effects + high-level routing
+View: BlocBuilder for detailed state access
+Widget: No Bloc access, parameters only
+
+File Organization:
+
+Pages in view/{feature}_page.dart
+Views in view/views/
+Widgets in view/widgets/
+Barrel files for clean imports
+
+UI Politeness:
+
+All UI at same level uses same state access pattern
+Don't mix BlocBuilder with direct parameters
+Keep state access at appropriate tier
+
+Follow these patterns for clean, maintainable, and testable UI.

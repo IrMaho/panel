@@ -1,0 +1,1035 @@
+# 🔥 Firebase Backend Integration Guide
+
+## 📋 Overview
+
+This guide defines how to integrate Firebase services with the Flutter MVVM architecture while maintaining clean separation of concerns and testability.
+
+---
+
+## 🎯 Core Principles
+
+- ✅ **Repository Pattern**: All Firebase calls go through repositories
+- ✅ **Stream Management**: Proper subscription handling in Cubits
+- ✅ **Offline-First**: Leverage Firestore caching
+- ✅ **Type Safety**: Use JsonSerializable for Firestore models
+- ✅ **Error Handling**: Use Result<T> pattern consistently
+- ✅ **Testability**: Mock Firebase services via abstractions
+
+---
+
+## 📦 Required Dependencies
+
+```yaml
+dependencies:
+  # Firebase Core
+  firebase_core: ^3.6.0
+  
+  # Firebase Services
+  cloud_firestore: ^5.4.4
+  firebase_auth: ^5.3.1
+  firebase_storage: ^12.3.4
+  firebase_analytics: ^11.3.3
+  
+  # Optional
+  cloud_functions: ^5.1.3
+  firebase_messaging: ^15.1.3
+
+dev_dependencies:
+  fake_cloud_firestore: ^3.0.3  # For testing
+  firebase_auth_mocks: ^0.14.1   # For testing
+```
+
+---
+
+## 🏗️ Architecture Integration
+
+### Folder Structure
+
+```
+lib/
+├── core/
+│   ├── model/
+│   │   ├── firebase/
+│   │   │   ├── firebase_service.dart          # Abstract Firebase interface
+│   │   │   ├── firestore_service.dart         # Firestore abstraction
+│   │   │   ├── auth_service.dart              # Auth abstraction
+│   │   │   ├── storage_service.dart           # Storage abstraction
+│   │   │   └── firebase_exception.dart        # Custom exceptions
+│   │   └── result.dart                        # Result<T> pattern
+│   └── di/
+│       └── firebase_di.dart                   # Firebase DI setup
+│
+└── features/
+    └── {feature}/
+        ├── model/
+        │   ├── data/
+        │   │   ├── {entity}.dart              # Firestore model
+        │   │   └── {entity}.g.dart
+        │   └── repositories/
+        │       ├── {entity}_repository.dart
+        │       └── {entity}_firestore_repository.dart  # Firebase impl
+        └── bloc/
+            └── {feature}_cubit.dart           # Stream subscriptions here
+```
+
+---
+
+## 🔥 Firestore Service Abstraction
+
+### Core Firestore Interface
+
+```dart
+// core/model/firebase/firestore_service.dart
+abstract class FirestoreService {
+  // Collection operations
+  CollectionReference<Map<String, dynamic>> collection(String path);
+  
+  // Document operations
+  DocumentReference<Map<String, dynamic>> doc(String path);
+  
+  // CRUD operations
+  Future<DocumentSnapshot<Map<String, dynamic>>> getDoc(String path);
+  Future<QuerySnapshot<Map<String, dynamic>>> getCollection(
+    String path, {
+    Query<Map<String, dynamic>> Function(Query<Map<String, dynamic>>)? queryBuilder,
+  });
+  
+  Future<void> setDoc(String path, Map<String, dynamic> data);
+  Future<void> updateDoc(String path, Map<String, dynamic> data);
+  Future<void> deleteDoc(String path);
+  
+  // Streams
+  Stream<DocumentSnapshot<Map<String, dynamic>>> docStream(String path);
+  Stream<QuerySnapshot<Map<String, dynamic>>> collectionStream(
+    String path, {
+    Query<Map<String, dynamic>> Function(Query<Map<String, dynamic>>)? queryBuilder,
+  });
+  
+  // Batch operations
+  WriteBatch batch();
+  Future<void> runTransaction<T>(
+    Future<T> Function(Transaction transaction) transactionHandler,
+  );
+}
+```
+
+### Implementation
+
+```dart
+// core/model/firebase/firestore_service_impl.dart
+class FirestoreServiceImpl implements FirestoreService {
+  final FirebaseFirestore _firestore;
+  
+  FirestoreServiceImpl({FirebaseFirestore? firestore})
+      : _firestore = firestore ?? FirebaseFirestore.instance;
+  
+  @override
+  CollectionReference<Map<String, dynamic>> collection(String path) {
+    return _firestore.collection(path);
+  }
+  
+  @override
+  Future<DocumentSnapshot<Map<String, dynamic>>> getDoc(String path) async {
+    try {
+      return await _firestore.doc(path).get();
+    } on FirebaseException catch (e) {
+      throw FirebaseExceptionHandler.handle(e);
+    }
+  }
+  
+  @override
+  Stream<DocumentSnapshot<Map<String, dynamic>>> docStream(String path) {
+    return _firestore.doc(path).snapshots();
+  }
+  
+  @override
+  Future<void> setDoc(String path, Map<String, dynamic> data) async {
+    try {
+      await _firestore.doc(path).set(data);
+    } on FirebaseException catch (e) {
+      throw FirebaseExceptionHandler.handle(e);
+    }
+  }
+  
+  // ... implement other methods
+}
+```
+
+---
+
+## 👤 Firebase Auth Service
+
+### Auth Interface
+
+```dart
+// core/model/firebase/auth_service.dart
+abstract class AuthService {
+  // Current user
+  User? get currentUser;
+  Stream<User?> get authStateChanges;
+  
+  // Authentication methods
+  Future<UserCredential> signInWithEmail(String email, String password);
+  Future<UserCredential> signUpWithEmail(String email, String password);
+  Future<UserCredential> signInWithGoogle();
+  Future<void> signOut();
+  Future<void> sendPasswordResetEmail(String email);
+  
+  // User operations
+  Future<void> updateDisplayName(String displayName);
+  Future<void> updateEmail(String email);
+  Future<void> deleteAccount();
+}
+```
+
+### Implementation
+
+```dart
+// core/model/firebase/auth_service_impl.dart
+class AuthServiceImpl implements AuthService {
+  final FirebaseAuth _auth;
+  
+  AuthServiceImpl({FirebaseAuth? auth})
+      : _auth = auth ?? FirebaseAuth.instance;
+  
+  @override
+  User? get currentUser => _auth.currentUser;
+  
+  @override
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
+  
+  @override
+  Future<UserCredential> signInWithEmail(String email, String password) async {
+    try {
+      return await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+    } on FirebaseAuthException catch (e) {
+      throw AuthExceptionHandler.handle(e);
+    }
+  }
+  
+  @override
+  Future<void> signOut() async {
+    try {
+      await _auth.signOut();
+    } on FirebaseAuthException catch (e) {
+      throw AuthExceptionHandler.handle(e);
+    }
+  }
+  
+  // ... implement other methods
+}
+```
+
+---
+
+## 📄 Firestore Data Models
+
+### Model Definition
+
+```dart
+// features/users/model/data/user.dart
+import 'package:json_annotation/json_annotation.dart';
+import 'package:equatable/equatable.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+part 'user.g.dart';
+
+@JsonSerializable()
+class User extends Equatable {
+  final String id;
+  final String name;
+  final String email;
+  
+  @JsonKey(
+    fromJson: _timestampFromJson,
+    toJson: _timestampToJson,
+  )
+  final DateTime createdAt;
+  
+  const User({
+    required this.id,
+    required this.name,
+    required this.email,
+    required this.createdAt,
+  });
+  
+  // Firestore timestamp converters
+  static DateTime _timestampFromJson(dynamic timestamp) {
+    if (timestamp is Timestamp) {
+      return timestamp.toDate();
+    }
+    return DateTime.parse(timestamp as String);
+  }
+  
+  static dynamic _timestampToJson(DateTime date) {
+    return Timestamp.fromDate(date);
+  }
+  
+  factory User.fromJson(Map<String, dynamic> json) => _$UserFromJson(json);
+  Map<String, dynamic> toJson() => _$UserToJson(this);
+  
+  // Firestore-specific factory
+  factory User.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return User.fromJson({
+      'id': doc.id,
+      ...data,
+    });
+  }
+  
+  @override
+  List<Object> get props => [id, name, email, createdAt];
+}
+```
+
+---
+
+## 🗂️ Repository Pattern for Firebase
+
+### Repository Interface
+
+```dart
+// features/users/model/repositories/user_repository.dart
+abstract class UserRepository {
+  Future<Result<User>> getUser(String userId);
+  Future<Result<List<User>>> getUsers();
+  Stream<Result<User>> watchUser(String userId);
+  Stream<Result<List<User>>> watchUsers();
+  Future<Result<void>> createUser(User user);
+  Future<Result<void>> updateUser(User user);
+  Future<Result<void>> deleteUser(String userId);
+}
+```
+
+### Firestore Implementation
+
+```dart
+// features/users/model/repositories/user_firestore_repository.dart
+class UserFirestoreRepository implements UserRepository {
+  final FirestoreService _firestore;
+  static const String _collection = 'users';
+  
+  UserFirestoreRepository(this._firestore);
+  
+  @override
+  Future<Result<User>> getUser(String userId) async {
+    try {
+      final doc = await _firestore.getDoc('$_collection/$userId');
+      
+      if (!doc.exists) {
+        return const Failure('User not found');
+      }
+      
+      final user = User.fromFirestore(doc);
+      return Success(user);
+    } on FirebaseCustomException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to fetch user: ${e.toString()}');
+    }
+  }
+  
+  @override
+  Future<Result<List<User>>> getUsers() async {
+    try {
+      final snapshot = await _firestore.getCollection(_collection);
+      
+      final users = snapshot.docs
+          .map((doc) => User.fromFirestore(doc))
+          .toList();
+      
+      return Success(users);
+    } on FirebaseCustomException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to fetch users: ${e.toString()}');
+    }
+  }
+  
+  @override
+  Stream<Result<User>> watchUser(String userId) {
+    return _firestore.docStream('$_collection/$userId').map((doc) {
+      try {
+        if (!doc.exists) {
+          return const Failure('User not found');
+        }
+        final user = User.fromFirestore(doc);
+        return Success(user);
+      } catch (e) {
+        return Failure('Failed to parse user: ${e.toString()}');
+      }
+    }).handleError((error) {
+      return Failure('Stream error: ${error.toString()}');
+    });
+  }
+  
+  @override
+  Stream<Result<List<User>>> watchUsers() {
+    return _firestore.collectionStream(_collection).map((snapshot) {
+      try {
+        final users = snapshot.docs
+            .map((doc) => User.fromFirestore(doc))
+            .toList();
+        return Success(users);
+      } catch (e) {
+        return Failure('Failed to parse users: ${e.toString()}');
+      }
+    }).handleError((error) {
+      return Failure('Stream error: ${error.toString()}');
+    });
+  }
+  
+  @override
+  Future<Result<void>> createUser(User user) async {
+    try {
+      await _firestore.setDoc(
+        '$_collection/${user.id}',
+        user.toJson(),
+      );
+      return const Success(null);
+    } on FirebaseCustomException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to create user: ${e.toString()}');
+    }
+  }
+  
+  @override
+  Future<Result<void>> updateUser(User user) async {
+    try {
+      await _firestore.updateDoc(
+        '$_collection/${user.id}',
+        user.toJson(),
+      );
+      return const Success(null);
+    } on FirebaseCustomException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to update user: ${e.toString()}');
+    }
+  }
+  
+  @override
+  Future<Result<void>> deleteUser(String userId) async {
+    try {
+      await _firestore.deleteDoc('$_collection/$userId');
+      return const Success(null);
+    } on FirebaseCustomException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to delete user: ${e.toString()}');
+    }
+  }
+}
+```
+
+---
+
+## 🎛️ Stream Management in Cubits
+
+### Real-time Data Pattern
+
+```dart
+// features/users/bloc/users_cubit.dart
+class UsersCubit extends Cubit<UsersState> with ErrorHandlingMixin<UsersState> {
+  final UserRepository _repository;
+  StreamSubscription<Result<List<User>>>? _usersSubscription;
+  
+  UsersCubit(this._repository) : super(const UsersState.initial());
+  
+  // Start listening to real-time updates
+  void watchUsers() {
+    emit(state.copyWith(isLoading: true));
+    
+    _usersSubscription = _repository.watchUsers().listen(
+      (result) {
+        switch (result) {
+          case Success(:final data):
+            emit(state.copyWith(
+              isLoading: false,
+              users: data,
+              status: UsersStatus.success,
+            ));
+          case Failure(:final message):
+            handleError(message);
+            emit(state.copyWith(
+              isLoading: false,
+              status: UsersStatus.error,
+              error: message,
+            ));
+        }
+      },
+      onError: (error) {
+        handleError('Stream error: ${error.toString()}');
+        emit(state.copyWith(
+          isLoading: false,
+          status: UsersStatus.error,
+        ));
+      },
+    );
+  }
+  
+  // One-time fetch
+  Future<void> loadUsers() async {
+    emit(state.copyWith(isLoading: true));
+    
+    final result = await _repository.getUsers();
+    
+    switch (result) {
+      case Success(:final data):
+        emit(state.copyWith(
+          isLoading: false,
+          users: data,
+          status: UsersStatus.success,
+        ));
+      case Failure(:final message):
+        handleError(message);
+        emit(state.copyWith(
+          isLoading: false,
+          status: UsersStatus.error,
+          error: message,
+        ));
+    }
+  }
+  
+  @override
+  Future<void> close() {
+    _usersSubscription?.cancel();
+    return super.close();
+  }
+}
+```
+
+### Stream Mixin Pattern (Reusable)
+
+```dart
+// core/bloc/stream_mixin.dart
+mixin StreamMixin<T, S> on Cubit<S> {
+  StreamSubscription<T>? _subscription;
+  
+  void listenToStream(
+    Stream<T> stream,
+    void Function(T data) onData, {
+    void Function(Object error)? onError,
+  }) {
+    _subscription?.cancel();
+    _subscription = stream.listen(
+      onData,
+      onError: onError,
+    );
+  }
+  
+  void cancelStream() {
+    _subscription?.cancel();
+    _subscription = null;
+  }
+  
+  @override
+  Future<void> close() {
+    _subscription?.cancel();
+    return super.close();
+  }
+}
+
+// Usage in Cubit
+class UsersCubit extends Cubit<UsersState> 
+    with ErrorHandlingMixin<UsersState>, StreamMixin<Result<List<User>>, UsersState> {
+  
+  void watchUsers() {
+    listenToStream(
+      _repository.watchUsers(),
+      (result) {
+        // Handle result
+      },
+      onError: (error) {
+        handleError(error.toString());
+      },
+    );
+  }
+}
+```
+
+---
+
+## 📁 Firebase Storage Integration
+
+### Storage Service
+
+```dart
+// core/model/firebase/storage_service.dart
+abstract class StorageService {
+  Future<String> uploadFile(String path, File file);
+  Future<String> uploadBytes(String path, Uint8List bytes);
+  Future<void> deleteFile(String path);
+  Future<String> getDownloadUrl(String path);
+}
+
+// Implementation
+class StorageServiceImpl implements StorageService {
+  final FirebaseStorage _storage;
+  
+  StorageServiceImpl({FirebaseStorage? storage})
+      : _storage = storage ?? FirebaseStorage.instance;
+  
+  @override
+  Future<String> uploadFile(String path, File file) async {
+    try {
+      final ref = _storage.ref(path);
+      await ref.putFile(file);
+      return await ref.getDownloadURL();
+    } on FirebaseException catch (e) {
+      throw StorageExceptionHandler.handle(e);
+    }
+  }
+  
+  @override
+  Future<void> deleteFile(String path) async {
+    try {
+      await _storage.ref(path).delete();
+    } on FirebaseException catch (e) {
+      throw StorageExceptionHandler.handle(e);
+    }
+  }
+  
+  @override
+  Future<String> getDownloadUrl(String path) async {
+    try {
+      return await _storage.ref(path).getDownloadURL();
+    } on FirebaseException catch (e) {
+      throw StorageExceptionHandler.handle(e);
+    }
+  }
+}
+```
+
+### Repository with Storage
+
+```dart
+class ProfileRepository {
+  final FirestoreService _firestore;
+  final StorageService _storage;
+  
+  ProfileRepository(this._firestore, this._storage);
+  
+  Future<Result<String>> uploadProfileImage(String userId, File image) async {
+    try {
+      final path = 'profiles/$userId/avatar.jpg';
+      final url = await _storage.uploadFile(path, image);
+      
+      await _firestore.updateDoc('users/$userId', {
+        'avatarUrl': url,
+      });
+      
+      return Success(url);
+    } on FirebaseCustomException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to upload image: ${e.toString()}');
+    }
+  }
+}
+```
+
+---
+
+## 🛡️ Error Handling
+
+### Custom Exception Types
+
+```dart
+// core/model/firebase/firebase_exception.dart
+enum FirebaseExceptionType {
+  notFound,
+  permissionDenied,
+  unauthenticated,
+  unavailable,
+  unknown,
+}
+
+class FirebaseCustomException implements Exception {
+  final String message;
+  final FirebaseExceptionType type;
+  final String? code;
+  
+  const FirebaseCustomException({
+    required this.message,
+    this.type = FirebaseExceptionType.unknown,
+    this.code,
+  });
+  
+  @override
+  String toString() => message;
+}
+
+class FirebaseExceptionHandler {
+  static FirebaseCustomException handle(FirebaseException e) {
+    switch (e.code) {
+      case 'not-found':
+        return FirebaseCustomException(
+          message: 'Document not found',
+          type: FirebaseExceptionType.notFound,
+          code: e.code,
+        );
+      case 'permission-denied':
+        return FirebaseCustomException(
+          message: 'Permission denied',
+          type: FirebaseExceptionType.permissionDenied,
+          code: e.code,
+        );
+      case 'unauthenticated':
+        return FirebaseCustomException(
+          message: 'User not authenticated',
+          type: FirebaseExceptionType.unauthenticated,
+          code: e.code,
+        );
+      case 'unavailable':
+        return FirebaseCustomException(
+          message: 'Service unavailable',
+          type: FirebaseExceptionType.unavailable,
+          code: e.code,
+        );
+      default:
+        return FirebaseCustomException(
+          message: e.message ?? 'An unknown error occurred',
+          code: e.code,
+        );
+    }
+  }
+}
+
+class AuthExceptionHandler {
+  static FirebaseCustomException handle(FirebaseAuthException e) {
+    switch (e.code) {
+      case 'user-not-found':
+        return const FirebaseCustomException(
+          message: 'No user found with this email',
+          type: FirebaseExceptionType.notFound,
+        );
+      case 'wrong-password':
+        return const FirebaseCustomException(
+          message: 'Invalid password',
+          type: FirebaseExceptionType.unauthenticated,
+        );
+      case 'email-already-in-use':
+        return const FirebaseCustomException(
+          message: 'This email is already registered',
+        );
+      case 'weak-password':
+        return const FirebaseCustomException(
+          message: 'Password is too weak',
+        );
+      case 'invalid-email':
+        return const FirebaseCustomException(
+          message: 'Invalid email address',
+        );
+      default:
+        return FirebaseCustomException(
+          message: e.message ?? 'Authentication failed',
+        );
+    }
+  }
+}
+```
+
+---
+
+## 🔌 Dependency Injection Setup
+
+```dart
+// core/di/firebase_di.dart
+Future<void> setupFirebaseDI() async {
+  // Initialize Firebase
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  
+  // Firebase services
+  getIt.registerLazySingleton<FirestoreService>(
+    () => FirestoreServiceImpl(),
+  );
+  
+  getIt.registerLazySingleton<AuthService>(
+    () => AuthServiceImpl(),
+  );
+  
+  getIt.registerLazySingleton<StorageService>(
+    () => StorageServiceImpl(),
+  );
+}
+
+// main.dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  await setupFirebaseDI();
+  setupServiceLocator();
+  
+  runApp(const MyApp());
+}
+```
+
+---
+
+## 🧪 Testing with Firebase Mocks
+
+### Mock Firestore
+
+```dart
+// test/features/users/model/repositories/user_repository_test.dart
+import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
+
+void main() {
+  late FakeFirebaseFirestore fakeFirestore;
+  late UserFirestoreRepository repository;
+  
+  setUp(() {
+    fakeFirestore = FakeFirebaseFirestore();
+    final firestoreService = FirestoreServiceImpl(firestore: fakeFirestore);
+    repository = UserFirestoreRepository(firestoreService);
+  });
+  
+  test('getUser returns user when exists', () async {
+    // Arrange
+    final userId = 'test-user-id';
+    await fakeFirestore.collection('users').doc(userId).set({
+      'name': 'Test User',
+      'email': 'test@example.com',
+      'createdAt': Timestamp.now(),
+    });
+    
+    // Act
+    final result = await repository.getUser(userId);
+    
+    // Assert
+    expect(result, isA<Success<User>>());
+    final user = (result as Success<User>).data;
+    expect(user.id, userId);
+    expect(user.name, 'Test User');
+  });
+}
+```
+
+### Mock Auth
+
+```dart
+import 'package:firebase_auth_mocks/firebase_auth_mocks.dart';
+
+void main() {
+  late MockFirebaseAuth mockAuth;
+  late AuthServiceImpl authService;
+  
+  setUp(() {
+    mockAuth = MockFirebaseAuth();
+    authService = AuthServiceImpl(auth: mockAuth);
+  });
+  
+  test('signInWithEmail returns user credential', () async {
+    // Arrange
+    final email = 'test@example.com';
+    final password = 'password123';
+    
+    // Act
+    final result = await authService.signInWithEmail(email, password);
+    
+    // Assert
+    expect(result.user, isNotNull);
+    expect(result.user!.email, email);
+  });
+}
+```
+
+---
+
+## 🔒 Firestore Security Rules
+
+### Basic Security Rules Template
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId);
+      allow update, delete: if isOwner(userId);
+    }
+    
+    // Posts collection (example with ownership)
+    match /posts/{postId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() 
+        && request.resource.data.authorId == request.auth.uid;
+      allow update, delete: if isAuthenticated()
+        && resource.data.authorId == request.auth.uid;
+    }
+  }
+}
+```
+
+---
+
+## ⚡ Offline Persistence
+
+### Enable Offline Persistence
+
+```dart
+// main.dart
+Future<void> setupFirebaseDI() async {
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  
+  // Enable offline persistence
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,
+    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+  );
+  
+  // Services setup...
+}
+```
+
+### Handle Offline State in UI
+
+```dart
+class UsersPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return BlocConsumer<UsersCubit, UsersState>(
+      listener: (context, state) {
+        // Show offline indicator
+        if (state.isOffline) {
+          toastification.show(
+            context: context,
+            type: ToastificationType.warning,
+            title: const Text('You are offline'),
+            description: const Text('Changes will sync when online'),
+          );
+        }
+      },
+      builder: (context, state) {
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Users'),
+            actions: [
+              if (state.isOffline)
+                const Icon(Icons.cloud_off, color: Colors.orange),
+            ],
+          ),
+          body: const UsersContentView(),
+        );
+      },
+    );
+  }
+}
+```
+
+---
+
+## 🚀 Best Practices
+
+### ✅ DO
+
+- ✅ Use transactions for multi-document updates
+- ✅ Implement proper stream cancellation in Cubits
+- ✅ Cache frequently accessed data
+- ✅ Use batch writes for bulk operations
+- ✅ Set proper security rules before production
+- ✅ Use subcollections for related data
+- ✅ Implement pagination for large collections
+- ✅ Handle offline scenarios gracefully
+
+### ❌ DON'T
+
+- ❌ Access Firebase directly from UI layer
+- ❌ Forget to cancel stream subscriptions
+- ❌ Store large files in Firestore (use Storage)
+- ❌ Use deeply nested data structures
+- ❌ Skip error handling for Firebase operations
+- ❌ Ignore security rules during development
+- ❌ Fetch entire collections without pagination
+- ❌ Store sensitive data in Firestore without encryption
+
+---
+
+## 📚 Advanced Patterns
+
+### Pagination
+
+```dart
+class UserRepository {
+  DocumentSnapshot? _lastDocument;
+  
+  Future<Result<List<User>>> getUsersPaginated({
+    int limit = 20,
+  }) async {
+    try {
+      Query query = _firestore.collection('users').limit(limit);
+      
+      if (_lastDocument != null) {
+        query = query.startAfterDocument(_lastDocument!);
+      }
+      
+      final snapshot = await query.get();
+      
+      if (snapshot.docs.isNotEmpty) {
+        _lastDocument = snapshot.docs.last;
+      }
+      
+      final users = snapshot.docs
+          .map((doc) => User.fromFirestore(doc))
+          .toList();
+      
+      return Success(users);
+    } catch (e) {
+      return Failure('Failed to fetch users: ${e.toString()}');
+    }
+  }
+  
+  void resetPagination() {
+    _lastDocument = null;
+  }
+}
+```
+
+### Compound Queries
+
+```dart
+Future<Result<List<Post>>> getPostsByAuthor(String authorId) async {
+  try {
+    final snapshot = await _firestore
+        .collection('posts')
+        .where('authorId', isEqualTo: authorId)
+        .where('isPublished', isEqualTo: true)
+        .orderBy('createdAt', descending: true)
+        .limit(50)
+        .get();
+    
+    final posts = snapshot.docs
+        .map((doc) => Post.fromFirestore(doc))
+        .toList();
+    
+    return Success(posts);
+  } catch (e) {
+    return Failure('Failed to fetch posts: ${e.toString()}');
+  }
+}
+```
+
+---
+
+This Firebase integration guide ensures your Flutter app maintains clean architecture while leveraging Firebase's real-time capabilities and offline-first approach.

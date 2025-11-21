@@ -1,0 +1,741 @@
+# 📊 Data Layer Standards
+
+## 🎯 Data Layer Architecture
+
+The data layer consists of:
+1. **DTOs/Entities**: Data models with JSON serialization
+2. **Repositories**: Data access abstractions
+3. **Repository Implementations**: Concrete data access logic
+
+---
+
+## 📦 Data Models with JsonSerializable
+
+### Why JsonSerializable (Not Freezed)
+- ✅ Lightweight and faster build times
+- ✅ Better for DTOs and API models
+- ✅ Explicit control over serialization
+- ✅ Works seamlessly with Equatable
+
+### Basic Model Structure
+
+```dart
+// features/users/model/data/user.dart
+import 'package:json_annotation/json_annotation.dart';
+import 'package:equatable/equatable.dart';
+
+part 'user.g.dart';
+
+@JsonSerializable()
+class User extends Equatable {
+  final String id;
+  final String name;
+  final String email;
+  
+  @JsonKey(name: 'phone_number') // Custom JSON key
+  final String? phoneNumber;
+  
+  final DateTime createdAt;
+  
+  const User({
+    required this.id,
+    required this.name,
+    required this.email,
+    this.phoneNumber,
+    required this.createdAt,
+  });
+  
+  // JSON deserialization
+  factory User.fromJson(Map<String, dynamic> json) => _$UserFromJson(json);
+  
+  // JSON serialization
+  Map<String, dynamic> toJson() => _$UserToJson(this);
+  
+  // Equatable for value comparison
+  @override
+  List<Object?> get props => [id, name, email, phoneNumber, createdAt];
+  
+  // Optional: copyWith for immutable updates
+  User copyWith({
+    String? id,
+    String? name,
+    String? email,
+    String? phoneNumber,
+    DateTime? createdAt,
+  }) {
+    return User(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      email: email ?? this.email,
+      phoneNumber: phoneNumber ?? this.phoneNumber,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+}
+```
+
+### Generate Code
+```bash
+# Run code generation
+dart run build_runner build --delete-conflicting-outputs
+
+# Watch mode (auto-regenerate on changes)
+dart run build_runner watch --delete-conflicting-outputs
+```
+
+---
+
+## 🔧 Advanced JsonSerializable Patterns
+
+### Custom Type Converters
+
+```dart
+// Custom DateTime converter for different formats
+class TimestampConverter implements JsonConverter<DateTime, dynamic> {
+  const TimestampConverter();
+  
+  @override
+  DateTime fromJson(dynamic json) {
+    if (json is int) {
+      // Unix timestamp in milliseconds
+      return DateTime.fromMillisecondsSinceEpoch(json);
+    } else if (json is String) {
+      return DateTime.parse(json);
+    }
+    throw ArgumentError('Invalid timestamp format');
+  }
+  
+  @override
+  dynamic toJson(DateTime dateTime) {
+    return dateTime.millisecondsSinceEpoch;
+  }
+}
+
+// Usage in model
+@JsonSerializable()
+class Event extends Equatable {
+  final String id;
+  
+  @TimestampConverter()
+  final DateTime startTime;
+  
+  const Event({
+    required this.id,
+    required this.startTime,
+  });
+  
+  factory Event.fromJson(Map<String, dynamic> json) => _$EventFromJson(json);
+  Map<String, dynamic> toJson() => _$EventToJson(this);
+  
+  @override
+  List<Object> get props => [id, startTime];
+}
+```
+
+### Nested Objects
+
+```dart
+@JsonSerializable()
+class Address extends Equatable {
+  final String street;
+  final String city;
+  final String country;
+  
+  const Address({
+    required this.street,
+    required this.city,
+    required this.country,
+  });
+  
+  factory Address.fromJson(Map<String, dynamic> json) => _$AddressFromJson(json);
+  Map<String, dynamic> toJson() => _$AddressToJson(this);
+  
+  @override
+  List<Object> get props => [street, city, country];
+}
+
+@JsonSerializable()
+class User extends Equatable {
+  final String id;
+  final String name;
+  final Address address; // Nested object
+  
+  const User({
+    required this.id,
+    required this.name,
+    required this.address,
+  });
+  
+  factory User.fromJson(Map<String, dynamic> json) => _$UserFromJson(json);
+  Map<String, dynamic> toJson() => _$UserToJson(this);
+  
+  @override
+  List<Object> get props => [id, name, address];
+}
+```
+
+### Lists and Collections
+
+```dart
+@JsonSerializable()
+class UserProfile extends Equatable {
+  final String userId;
+  final List<String> tags;
+  final List<Address> addresses;
+  final Map<String, dynamic> metadata;
+  
+  const UserProfile({
+    required this.userId,
+    required this.tags,
+    required this.addresses,
+    required this.metadata,
+  });
+  
+  factory UserProfile.fromJson(Map<String, dynamic> json) => 
+      _$UserProfileFromJson(json);
+  Map<String, dynamic> toJson() => _$UserProfileToJson(this);
+  
+  @override
+  List<Object> get props => [userId, tags, addresses, metadata];
+}
+```
+
+### Enums
+
+```dart
+enum UserRole {
+  @JsonValue('admin')
+  admin,
+  
+  @JsonValue('user')
+  user,
+  
+  @JsonValue('guest')
+  guest,
+}
+
+@JsonSerializable()
+class User extends Equatable {
+  final String id;
+  final UserRole role;
+  
+  const User({
+    required this.id,
+    required this.role,
+  });
+  
+  factory User.fromJson(Map<String, dynamic> json) => _$UserFromJson(json);
+  Map<String, dynamic> toJson() => _$UserToJson(this);
+  
+  @override
+  List<Object> get props => [id, role];
+}
+```
+
+### Handling Null and Default Values
+
+```dart
+@JsonSerializable()
+class User extends Equatable {
+  final String id;
+  
+  // Required field
+  final String name;
+  
+  // Nullable field
+  final String? email;
+  
+  // Default value if JSON is null
+  @JsonKey(defaultValue: false)
+  final bool isActive;
+  
+  // Default value with custom logic
+  @JsonKey(defaultValue: [])
+  final List<String> tags;
+  
+  // Ignore field (won't be serialized)
+  @JsonKey(ignore: true)
+  final String? tempData;
+  
+  const User({
+    required this.id,
+    required this.name,
+    this.email,
+    this.isActive = false,
+    this.tags = const [],
+    this.tempData,
+  });
+  
+  factory User.fromJson(Map<String, dynamic> json) => _$UserFromJson(json);
+  Map<String, dynamic> toJson() => _$UserToJson(this);
+  
+  @override
+  List<Object?> get props => [id, name, email, isActive, tags];
+}
+```
+
+---
+
+## 📝 Request/Response DTOs
+
+### Request Models
+
+```dart
+// features/users/model/data/create_user_request.dart
+@JsonSerializable(createFactory: false) // No fromJson needed
+class CreateUserRequest extends Equatable {
+  final String name;
+  final String email;
+  final String password;
+  
+  const CreateUserRequest({
+    required this.name,
+    required this.email,
+    required this.password,
+  });
+  
+  // Only need toJson for requests
+  Map<String, dynamic> toJson() => _$CreateUserRequestToJson(this);
+  
+  @override
+  List<Object> get props => [name, email, password];
+}
+
+// features/users/model/data/update_user_request.dart
+@JsonSerializable(createFactory: false)
+class UpdateUserRequest extends Equatable {
+  final String? name;
+  final String? email;
+  final String? phoneNumber;
+  
+  const UpdateUserRequest({
+    this.name,
+    this.email,
+    this.phoneNumber,
+  });
+  
+  Map<String, dynamic> toJson() => _$UpdateUserRequestToJson(this);
+  
+  @override
+  List<Object?> get props => [name, email, phoneNumber];
+}
+```
+
+### Response Models
+
+```dart
+// features/users/model/data/user_response.dart
+@JsonSerializable(createToJson: false) // No toJson needed
+class UserResponse extends Equatable {
+  final bool success;
+  final String message;
+  final User? data;
+  
+  const UserResponse({
+    required this.success,
+    required this.message,
+    this.data,
+  });
+  
+  // Only need fromJson for responses
+  factory UserResponse.fromJson(Map<String, dynamic> json) => 
+      _$UserResponseFromJson(json);
+  
+  @override
+  List<Object?> get props => [success, message, data];
+}
+```
+
+---
+
+## 🗂️ Repository Pattern
+
+### Repository Interface (Abstract)
+
+```dart
+// features/users/model/repositories/user_repository.dart
+import '../data/user.dart';
+import '../data/create_user_request.dart';
+import '../data/update_user_request.dart';
+import '../../../../core/model/result.dart';
+
+abstract class UserRepository {
+  // Read operations
+  Future<Result<List<User>>> getUsers();
+  Future<Result<User>> getUserById(String id);
+  
+  // Write operations
+  Future<Result<User>> createUser(CreateUserRequest request);
+  Future<Result<User>> updateUser(String id, UpdateUserRequest request);
+  Future<Result<void>> deleteUser(String id);
+  
+  // Search/Filter operations
+  Future<Result<List<User>>> searchUsers(String query);
+  Future<Result<List<User>>> getUsersByRole(String role);
+}
+```
+
+### Repository Implementation
+
+```dart
+// features/users/model/repositories/user_repository_impl.dart
+class UserRepositoryImpl implements UserRepository {
+  final NetworkService _networkService;
+  
+  UserRepositoryImpl(this._networkService);
+  
+  @override
+  Future<Result<List<User>>> getUsers() async {
+    try {
+      final response = await _networkService.get('/users');
+      
+      final users = (response.data as List)
+          .map((json) => User.fromJson(json as Map<String, dynamic>))
+          .toList();
+      
+      return Success(users);
+    } on NetworkException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to fetch users: ${e.toString()}');
+    }
+  }
+  
+  @override
+  Future<Result<User>> getUserById(String id) async {
+    try {
+      final response = await _networkService.get('/users/$id');
+      final user = User.fromJson(response.data as Map<String, dynamic>);
+      return Success(user);
+    } on NetworkException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to fetch user: ${e.toString()}');
+    }
+  }
+  
+  @override
+  Future<Result<User>> createUser(CreateUserRequest request) async {
+    try {
+      final response = await _networkService.post(
+        '/users',
+        data: request.toJson(),
+      );
+      
+      final user = User.fromJson(response.data as Map<String, dynamic>);
+      return Success(user);
+    } on NetworkException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to create user: ${e.toString()}');
+    }
+  }
+  
+  @override
+  Future<Result<User>> updateUser(
+    String id,
+    UpdateUserRequest request,
+  ) async {
+    try {
+      final response = await _networkService.put(
+        '/users/$id',
+        data: request.toJson(),
+      );
+      
+      final user = User.fromJson(response.data as Map<String, dynamic>);
+      return Success(user);
+    } on NetworkException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to update user: ${e.toString()}');
+    }
+  }
+  
+  @override
+  Future<Result<void>> deleteUser(String id) async {
+    try {
+      await _networkService.delete('/users/$id');
+      return const Success(null);
+    } on NetworkException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to delete user: ${e.toString()}');
+    }
+  }
+  
+  @override
+  Future<Result<List<User>>> searchUsers(String query) async {
+    try {
+      final response = await _networkService.get(
+        '/users/search',
+        queryParameters: {'q': query},
+      );
+      
+      final users = (response.data as List)
+          .map((json) => User.fromJson(json as Map<String, dynamic>))
+          .toList();
+      
+      return Success(users);
+    } on NetworkException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Failed to search users: ${e.toString()}');
+    }
+  }
+}
+```
+
+---
+
+## 🎯 Result Pattern
+
+### Result Type Definition
+
+```dart
+// core/model/result.dart
+sealed class Result<T> {
+  const Result();
+}
+
+final class Success<T> extends Result<T> {
+  final T data;
+  const Success(this.data);
+}
+
+final class Failure<T> extends Result<T> {
+  final String message;
+  final Exception? exception;
+  
+  const Failure(this.message, [this.exception]);
+}
+```
+
+### Using Result in Repository
+
+```dart
+// ✅ CORRECT: Always wrap in Result<T>
+Future<Result<User>> getUser(String id) async {
+  try {
+    final response = await _api.get('/users/$id');
+    return Success(User.fromJson(response.data));
+  } catch (e) {
+    return Failure('Failed to load user');
+  }
+}
+
+// ❌ WRONG: Don't throw exceptions from repositories
+Future<User> getUser(String id) async {
+  final response = await _api.get('/users/$id');
+  return User.fromJson(response.data); // Can throw!
+}
+```
+
+### Pattern Matching with Result
+
+```dart
+// In Cubit
+Future<void> loadUser(String id) async {
+  emit(state.copyWith(isLoading: true));
+  
+  final result = await _repository.getUserById(id);
+  
+  // Pattern matching with switch
+  switch (result) {
+    case Success(:final data):
+      emit(state.copyWith(
+        user: data,
+        isLoading: false,
+        status: UserStatus.success,
+      ));
+      
+    case Failure(:final message):
+      emit(state.copyWith(
+        error: message,
+        isLoading: false,
+        status: UserStatus.error,
+      ));
+  }
+}
+```
+
+---
+
+## 🚫 Anti-Patterns
+
+### ❌ Repository Depending on Another Repository
+```dart
+// ❌ WRONG: Repository calling another repository
+class UserRepositoryImpl implements UserRepository {
+  final PostRepository _postRepo; // ❌ Don't do this
+  
+  Future<Result<User>> getUserWithPosts(String id) async {
+    final user = await getUser(id);
+    final posts = await _postRepo.getPosts(id); // ❌ Wrong layer
+    return user;
+  }
+}
+
+// ✅ CORRECT: Use a UseCase for multi-repository logic
+class GetUserWithPostsUseCase {
+  final UserRepository _userRepo;
+  final PostRepository _postRepo;
+  
+  Future<Result<UserWithPosts>> execute(String userId) async {
+    final userResult = await _userRepo.getUser(userId);
+    if (userResult is Failure) return Failure(userResult.message);
+    
+    final postsResult = await _postRepo.getPosts(userId);
+    if (postsResult is Failure) return Failure(postsResult.message);
+    
+    return Success(UserWithPosts(
+      user: (userResult as Success).data,
+      posts: (postsResult as Success).data,
+    ));
+  }
+}
+```
+
+### ❌ Business Logic in Repository
+```dart
+// ❌ WRONG: Business logic in repository
+class OrderRepositoryImpl implements OrderRepository {
+  Future<Result<Order>> createOrder(CreateOrderRequest request) async {
+    // ❌ Complex validation logic
+    if (request.items.isEmpty) return Failure('No items');
+    if (request.totalPrice < 10) return Failure('Min order $10');
+    if (!_isValidAddress(request.address)) return Failure('Invalid address');
+    
+    // ❌ Multiple operations
+    final inventory = await _checkInventory(request.items);
+    final payment = await _processPayment(request.payment);
+    final shipping = await _calculateShipping(request.address);
+    
+    // API call
+  }
+}
+
+// ✅ CORRECT: Keep repository simple, use UseCase
+class OrderRepositoryImpl implements OrderRepository {
+  Future<Result<Order>> createOrder(CreateOrderRequest request) async {
+    try {
+      final response = await _api.post('/orders', data: request.toJson());
+      return Success(Order.fromJson(response.data));
+    } catch (e) {
+      return Failure('Failed to create order');
+    }
+  }
+}
+
+// Business logic in UseCase
+class CreateOrderUseCase {
+  Future<Result<Order>> execute(CreateOrderRequest request) async {
+    // Validation, inventory check, payment, etc.
+  }
+}
+```
+
+### ❌ Not Using Result Pattern
+```dart
+// ❌ WRONG: Throwing exceptions
+Future<User> getUser(String id) async {
+  final response = await _api.get('/users/$id');
+  if (response.statusCode != 200) {
+    throw Exception('Failed'); // ❌ Don't throw
+  }
+  return User.fromJson(response.data);
+}
+
+// ✅ CORRECT: Return Result<T>
+Future<Result<User>> getUser(String id) async {
+  try {
+    final response = await _api.get('/users/$id');
+    return Success(User.fromJson(response.data));
+  } catch (e) {
+    return Failure('Failed to fetch user');
+  }
+}
+```
+
+---
+
+## ✅ Best Practices
+
+### 1. Keep DTOs Simple
+DTOs should only contain data, no logic.
+
+### 2. Use JsonSerializable, Not Freezed
+Freezed is for state classes, not DTOs.
+
+### 3. Always Return Result<T>
+Never throw exceptions from repositories.
+
+### 4. One Repository per Entity
+Don't create god repositories.
+
+### 5. Keep Repositories Thin
+Complex logic goes in UseCases.
+
+### 6. Proper Error Messages
+Provide meaningful error messages, not generic ones.
+
+```dart
+✅ return Failure('User with email already exists');
+❌ return Failure('Error');
+```
+
+### 7. Handle All Exception Types
+```dart
+try {
+  // Operation
+} on NetworkException catch (e) {
+  return Failure(e.message);
+} on FormatException catch (e) {
+  return Failure('Invalid data format');
+} catch (e) {
+  return Failure('An unexpected error occurred');
+}
+```
+
+---
+
+## 📋 Data Layer Checklist
+
+When creating data layer for a feature:
+- [ ] Create entity model with `@JsonSerializable`
+- [ ] Run `build_runner` to generate `.g.dart` file
+- [ ] Extend `Equatable` for value comparison
+- [ ] Create request DTOs (if needed)
+- [ ] Create response DTOs (if needed)
+- [ ] Define repository interface (abstract class)
+- [ ] Implement repository with `Result<T>` returns
+- [ ] Handle all exception types properly
+- [ ] Register repository in DI (as singleton)
+- [ ] Write repository unit tests with mocks
+
+---
+
+## 🎓 Summary
+
+**Models**:
+- Use JsonSerializable for all DTOs
+- Extend Equatable for value comparison
+- Run build_runner to generate code
+
+**Repositories**:
+- Define abstract interface
+- Implement concrete class
+- Always return Result<T>
+- Keep them thin (no business logic)
+- One repository per entity
+
+**Error Handling**:
+- Never throw exceptions
+- Use Result<Success|Failure> pattern
+- Provide meaningful error messages
+
+**Testing**:
+- Mock repositories for unit tests
+- Test all success and failure paths
+- Use fake data for model tests
+
+Follow these patterns for a clean, testable data layer.

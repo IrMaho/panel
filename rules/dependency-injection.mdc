@@ -1,0 +1,610 @@
+# 🔌 Dependency Injection Standards
+
+## 🎯 Why Dependency Injection?
+
+### Benefits
+- ✅ **Loose Coupling**: Classes don't create their dependencies
+- ✅ **Testability**: Easy to inject mocks for testing
+- ✅ **Flexibility**: Swap implementations without changing code
+- ✅ **Single Source of Truth**: Centralized dependency configuration
+
+---
+
+## 📦 GetIt Setup
+
+### Core Service Locator
+
+```dart
+// core/di/service_locator.dart
+import 'package:get_it/get_it.dart';
+import '../model/network/network_service.dart';
+import '../model/network/dio_network_service.dart';
+import '../../features/auth/auth_di.dart';
+import '../../features/users/users_di.dart';
+import '../../features/posts/posts_di.dart';
+
+// Global GetIt instance
+final getIt = GetIt.instance;
+
+/// Initialize all dependency injections
+Future<void> setupServiceLocator() async {
+  // Core services (register first)
+  _registerCoreServices();
+  
+  // Feature-specific dependencies
+  await setupAuthDI();
+  setupUsersDI();
+  setupPostsDI();
+}
+
+void _registerCoreServices() {
+  // Network service (singleton)
+  getIt.registerLazySingleton<NetworkService>(
+    () => DioNetworkService(
+      baseUrl: 'https://api.example.com',
+      connectTimeout: const Duration(seconds: 30),
+    ),
+  );
+  
+  // Add other core services here
+  // Storage, analytics, etc.
+}
+```
+
+### Main.dart Integration
+
+```dart
+// main.dart
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize Firebase if needed
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+  
+  // Setup all dependencies
+  await setupServiceLocator();
+  
+  runApp(const MyApp());
+}
+```
+
+---
+
+## 🎨 Registration Types
+
+### 1. Lazy Singleton (Most Common)
+**Use for**: Services, Repositories, Network clients
+**Lifecycle**: Created once on first use, lives until app closes
+
+```dart
+// ✅ Use for stateless services
+getIt.registerLazySingleton<UserRepository>(
+  () => UserRepositoryImpl(getIt<NetworkService>()),
+);
+
+getIt.registerLazySingleton<AuthService>(
+  () => AuthServiceImpl(getIt<NetworkService>()),
+);
+
+getIt.registerLazySingleton<StorageService>(
+  () => HiveStorageService(),
+);
+```
+
+### 2. Factory (For Stateful Classes)
+**Use for**: Cubits, ViewModels, UseCases
+**Lifecycle**: New instance created every time
+
+```dart
+// ✅ Use for Cubits (need fresh state each time)
+getIt.registerFactory<UsersCubit>(
+  () => UsersCubit(getIt<UserRepository>()),
+);
+
+getIt.registerFactory<LoginCubit>(
+  () => LoginCubit(
+    getIt<AuthRepository>(),
+    getIt<ValidationService>(),
+  ),
+);
+
+// ✅ Use for UseCases (stateless but called multiple times)
+getIt.registerFactory<CreateOrderUseCase>(
+  () => CreateOrderUseCase(
+    getIt<OrderRepository>(),
+    getIt<PaymentRepository>(),
+    getIt<NotificationService>(),
+  ),
+);
+```
+
+### 3. Singleton (Rare)
+**Use for**: Immediately needed services
+**Lifecycle**: Created immediately, lives until app closes
+
+```dart
+// ⚠️ Use sparingly (creates instance immediately)
+getIt.registerSingleton<Logger>(
+  Logger(), // Created right now
+);
+```
+
+---
+
+## 🏗️ Feature-Specific DI
+
+### Feature DI File Structure
+
+```dart
+// features/users/users_di.dart
+import 'package:get_it/get_it.dart';
+import '../../core/di/service_locator.dart';
+import 'bloc/users_cubit.dart';
+import 'model/repositories/user_repository.dart';
+import 'model/repositories/user_repository_impl.dart';
+
+void setupUsersDI() {
+  // Repository (singleton)
+  getIt.registerLazySingleton<UserRepository>(
+    () => UserRepositoryImpl(getIt()),
+  );
+  
+  // Cubit (factory - new instance each time)
+  getIt.registerFactory<UsersCubit>(
+    () => UsersCubit(getIt()),
+  );
+}
+```
+
+### Complex Feature with Multiple Dependencies
+
+```dart
+// features/auth/auth_di.dart
+import 'package:get_it/get_it.dart';
+import '../../core/di/service_locator.dart';
+import 'bloc/login_cubit.dart';
+import 'bloc/register_cubit.dart';
+import 'model/repositories/auth_repository.dart';
+import 'model/repositories/auth_repository_impl.dart';
+import 'model/usecases/validate_and_login_usecase.dart';
+
+Future<void> setupAuthDI() async {
+  // Repository
+  getIt.registerLazySingleton<AuthRepository>(
+    () => AuthRepositoryImpl(
+      getIt(), // NetworkService
+      getIt(), // StorageService
+    ),
+  );
+  
+  // UseCases
+  getIt.registerFactory<ValidateAndLoginUseCase>(
+    () => ValidateAndLoginUseCase(
+      getIt<AuthRepository>(),
+      getIt<ValidationService>(),
+    ),
+  );
+  
+  // Cubits
+  getIt.registerFactory<LoginCubit>(
+    () => LoginCubit(
+      getIt<ValidateAndLoginUseCase>(),
+      getIt<AnalyticsService>(),
+    ),
+  );
+  
+  getIt.registerFactory<RegisterCubit>(
+    () => RegisterCubit(
+      getIt<AuthRepository>(),
+      getIt<ValidationService>(),
+    ),
+  );
+}
+```
+
+---
+
+## 🎯 Dependency Resolution
+
+### Automatic Resolution
+GetIt automatically resolves dependencies when you use `getIt()`:
+
+```dart
+// UserRepositoryImpl requires NetworkService
+class UserRepositoryImpl implements UserRepository {
+  final NetworkService _networkService;
+  
+  UserRepositoryImpl(this._networkService);
+}
+
+// Registration - GetIt resolves NetworkService automatically
+getIt.registerLazySingleton<UserRepository>(
+  () => UserRepositoryImpl(getIt()), // ✅ GetIt finds NetworkService
+);
+
+// Or be explicit
+getIt.registerLazySingleton<UserRepository>(
+  () => UserRepositoryImpl(getIt<NetworkService>()),
+);
+```
+
+### Multiple Dependencies
+
+```dart
+class OrderCubit extends Cubit<OrderState> {
+  final OrderRepository _orderRepo;
+  final PaymentRepository _paymentRepo;
+  final NotificationService _notificationService;
+  final AnalyticsService _analytics;
+  
+  OrderCubit(
+    this._orderRepo,
+    this._paymentRepo,
+    this._notificationService,
+    this._analytics,
+  );
+}
+
+// Registration
+getIt.registerFactory<OrderCubit>(
+  () => OrderCubit(
+    getIt<OrderRepository>(),
+    getIt<PaymentRepository>(),
+    getIt<NotificationService>(),
+    getIt<AnalyticsService>(),
+  ),
+);
+
+// Or shorter (if types are unique)
+getIt.registerFactory<OrderCubit>(
+  () => OrderCubit(
+    getIt(),
+    getIt(),
+    getIt(),
+    getIt(),
+  ),
+);
+```
+
+---
+
+## 🎨 Usage in UI
+
+### Using Cubits with BlocProvider
+
+```dart
+// ✅ CORRECT: Get Cubit from GetIt in BlocProvider
+class UsersPage extends StatelessWidget {
+  static const routeName = '/users';
+  
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (context) => getIt<UsersCubit>()..loadUsers(),
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Users')),
+        body: const UsersContentView(),
+      ),
+    );
+  }
+}
+
+// ❌ WRONG: Don't create Cubit manually
+class BadUsersPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (context) => UsersCubit(
+        UserRepositoryImpl(DioNetworkService()), // ❌ Manual creation
+      ),
+      child: Scaffold(...),
+    );
+  }
+}
+```
+
+### Using Multiple Providers
+
+```dart
+class HomePage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MultiBlocProvider(
+      providers: [
+        BlocProvider(
+          create: (context) => getIt<UsersCubit>()..loadUsers(),
+        ),
+        BlocProvider(
+          create: (context) => getIt<PostsCubit>()..loadPosts(),
+        ),
+        BlocProvider(
+          create: (context) => getIt<NotificationsCubit>()..initialize(),
+        ),
+      ],
+      child: Scaffold(
+        body: const HomeContentView(),
+      ),
+    );
+  }
+}
+```
+
+---
+
+## 🧪 DI for Testing
+
+### Test Setup with Mocks
+
+```dart
+// test/features/users/bloc/users_cubit_test.dart
+import 'package:mockito/mockito.dart';
+import 'package:mockito/annotations.dart';
+
+@GenerateMocks([UserRepository])
+void main() {
+  late UsersCubit cubit;
+  late MockUserRepository mockRepository;
+  
+  setUp(() {
+    mockRepository = MockUserRepository();
+    
+    // Override GetIt registration for testing
+    getIt.registerFactory<UserRepository>(() => mockRepository);
+    
+    cubit = UsersCubit(mockRepository);
+  });
+  
+  tearDown(() {
+    getIt.reset(); // Clear all registrations
+  });
+  
+  test('loadUsers emits correct states', () async {
+    // Arrange
+    when(mockRepository.getUsers())
+        .thenAnswer((_) async => Success([mockUser]));
+    
+    // Act
+    await cubit.loadUsers();
+    
+    // Assert
+    expect(cubit.state.users, [mockUser]);
+  });
+}
+```
+
+### Test DI Setup
+
+```dart
+// test/core/di/test_service_locator.dart
+import 'package:get_it/get_it.dart';
+
+final testGetIt = GetIt.instance;
+
+void setupTestDI() {
+  testGetIt.reset();
+  
+  // Register mocks
+  testGetIt.registerLazySingleton<NetworkService>(
+    () => MockNetworkService(),
+  );
+  
+  testGetIt.registerLazySingleton<StorageService>(
+    () => MockStorageService(),
+  );
+}
+```
+
+---
+
+## 🚫 Anti-Patterns
+
+### ❌ Service Locator Anti-Pattern in Business Logic
+```dart
+// ❌ WRONG: Using GetIt inside business logic
+class UserRepositoryImpl implements UserRepository {
+  Future<Result<List<User>>> getUsers() async {
+    final networkService = getIt<NetworkService>(); // ❌ Don't do this
+    final response = await networkService.get('/users');
+    return Success(users);
+  }
+}
+
+// ✅ CORRECT: Inject dependencies via constructor
+class UserRepositoryImpl implements UserRepository {
+  final NetworkService _networkService;
+  
+  UserRepositoryImpl(this._networkService); // ✅ Constructor injection
+  
+  Future<Result<List<User>>> getUsers() async {
+    final response = await _networkService.get('/users');
+    return Success(users);
+  }
+}
+```
+
+### ❌ Registering Cubits as Singletons
+```dart
+// ❌ WRONG: Cubit as singleton (state will be shared!)
+getIt.registerLazySingleton<UsersCubit>(
+  () => UsersCubit(getIt()),
+);
+
+// ✅ CORRECT: Cubit as factory (new instance each time)
+getIt.registerFactory<UsersCubit>(
+  () => UsersCubit(getIt()),
+);
+```
+
+### ❌ Circular Dependencies
+```dart
+// ❌ WRONG: A depends on B, B depends on A
+class ServiceA {
+  final ServiceB serviceB;
+  ServiceA(this.serviceB);
+}
+
+class ServiceB {
+  final ServiceA serviceA;
+  ServiceB(this.serviceA);
+}
+
+// ✅ CORRECT: Extract shared logic to a third service
+class SharedService {
+  void doSomething() {}
+}
+
+class ServiceA {
+  final SharedService shared;
+  ServiceA(this.shared);
+}
+
+class ServiceB {
+  final SharedService shared;
+  ServiceB(this.shared);
+}
+```
+
+### ❌ Not Resetting GetIt in Tests
+```dart
+// ❌ WRONG: State leaks between tests
+void main() {
+  test('test 1', () {
+    getIt.registerFactory<UserRepository>(() => MockUserRepo());
+    // test code
+  });
+  
+  test('test 2', () {
+    // Still has mock from test 1! ❌
+  });
+}
+
+// ✅ CORRECT: Reset between tests
+void main() {
+  setUp(() {
+    getIt.reset(); // Clear all registrations
+    setupTestDI();
+  });
+  
+  test('test 1', () { });
+  test('test 2', () { });
+}
+```
+
+---
+
+## ✅ Best Practices
+
+### 1. Register in Order
+Register dependencies before the classes that need them:
+```dart
+// ✅ CORRECT order
+getIt.registerLazySingleton<NetworkService>(() => DioNetworkService());
+getIt.registerLazySingleton<UserRepository>(
+  () => UserRepositoryImpl(getIt()),
+);
+getIt.registerFactory<UsersCubit>(
+  () => UsersCubit(getIt()),
+);
+```
+
+### 2. Use Feature-Specific DI Files
+Keep DI organized by feature:
+```
+features/
+├── auth/
+│   └── auth_di.dart
+├── users/
+│   └── users_di.dart
+└── posts/
+    └── posts_di.dart
+```
+
+### 3. Be Explicit When Needed
+If you have multiple implementations, be explicit:
+```dart
+getIt.registerLazySingleton<UserRepository>(
+  () => UserApiRepository(getIt<NetworkService>()),
+  instanceName: 'api',
+);
+
+getIt.registerLazySingleton<UserRepository>(
+  () => UserFirebaseRepository(getIt<FirestoreService>()),
+  instanceName: 'firebase',
+);
+
+// Usage
+final apiRepo = getIt<UserRepository>(instanceName: 'api');
+final firebaseRepo = getIt<UserRepository>(instanceName: 'firebase');
+```
+
+### 4. Async Registration
+Use async registration when needed (e.g., Firebase):
+```dart
+Future<void> setupServiceLocator() async {
+  // Async operations
+  await Firebase.initializeApp();
+  
+  getIt.registerLazySingleton<FirestoreService>(
+    () => FirestoreServiceImpl(),
+  );
+}
+```
+
+### 5. Environment-Based Registration
+```dart
+void setupServiceLocator() {
+  if (kDebugMode) {
+    // Use mock services in debug
+    getIt.registerLazySingleton<NetworkService>(
+      () => MockNetworkService(),
+    );
+  } else {
+    // Use real services in production
+    getIt.registerLazySingleton<NetworkService>(
+      () => DioNetworkService(baseUrl: 'https://api.example.com'),
+    );
+  }
+}
+```
+
+---
+
+## 📋 DI Checklist
+
+When adding a new dependency:
+- [ ] Determine registration type (singleton vs factory)
+- [ ] Register in appropriate DI file (core or feature)
+- [ ] Inject via constructor (not service locator in logic)
+- [ ] Call feature DI setup in main service locator
+- [ ] Verify order of registration (dependencies first)
+- [ ] Create mocks for testing
+- [ ] Reset GetIt in test tearDown
+
+---
+
+## 🎓 Summary
+
+**Registration Types**:
+- `registerLazySingleton`: Services, Repositories (one instance)
+- `registerFactory`: Cubits, UseCases (new instance each time)
+- `registerSingleton`: Rarely needed (immediate creation)
+
+**Structure**:
+- Core services in `core/di/service_locator.dart`
+- Feature dependencies in `features/{feature}/{feature}_di.dart`
+- Call all DI setup in main before `runApp()`
+
+**Usage**:
+- In UI: `getIt<UsersCubit>()` inside BlocProvider
+- In logic: Constructor injection, NOT service locator
+- In tests: Override with mocks, reset in tearDown
+
+**Anti-Patterns**:
+- ❌ Using GetIt inside business logic
+- ❌ Registering Cubits as singletons
+- ❌ Circular dependencies
+- ❌ Not resetting in tests
+
+Follow these patterns for clean, testable dependency management.

@@ -1,0 +1,448 @@
+# 🏗️ Flutter Enterprise Architecture Overview
+
+## 📋 Core Architecture Pattern
+
+This project follows **MVVM (Model-View-ViewModel)** architecture with a **Feature-First** folder structure.
+
+---
+
+## 🎯 MVVM Layer Responsibilities
+
+### 📱 View Layer
+**Location**: `features/{feature}/view/`
+
+**Responsibility**: UI presentation only
+
+**Components**:
+- **Pages**: Route entry points with DI setup
+- **Views**: Composite layout sections
+- **Widgets**: Reusable UI components
+
+**Rules**:
+- ✅ Display data from state
+- ✅ Trigger actions via callbacks
+- ✅ Handle user input
+- ❌ NO business logic
+- ❌ NO data manipulation
+- ❌ NO direct repository access
+
+---
+
+### 🎛️ ViewModel Layer
+**Location**: `features/{feature}/bloc/`
+
+**Responsibility**: State management and UI logic
+
+**Components**:
+- **Cubit**: State management (default choice)
+- **Bloc**: State management with events (only when needed)
+- **State**: Immutable state classes
+
+**Rules**:
+- ✅ Manage UI state
+- ✅ Coordinate repository calls
+- ✅ Handle user actions
+- ✅ Emit new states
+- ✅ Delegate complex logic to UseCases
+- ❌ NO UI code
+- ❌ NO direct API calls
+- ❌ NO direct network/database access
+
+---
+
+### 📊 Model Layer
+**Location**: `features/{feature}/model/`
+
+**Responsibility**: Business logic and data access
+
+**Components**:
+- **Repositories**: Data access abstractions
+- **DTOs/Entities**: Data models with JSON serialization
+- **UseCases**: Complex business logic (when needed)
+
+**Rules**:
+- ✅ Define data access contracts (repositories)
+- ✅ Implement data access logic
+- ✅ Transform and validate data
+- ✅ Handle complex business operations
+- ❌ NO UI logic
+- ❌ NO state management
+
+---
+
+## 📁 Feature-First Structure
+
+### Why Feature-First?
+
+**✅ Benefits**:
+- Clear feature boundaries
+- Easy to find related code
+- Scalable for large teams
+- Simple to add/remove features
+- Better code ownership
+
+**❌ NOT Layer-First** (we don't do this):
+```
+lib/
+├── views/           # ❌ All views mixed together
+├── viewmodels/      # ❌ All cubits mixed together
+└── models/          # ❌ All models mixed together
+```
+
+### Core Project Structure
+
+```
+lib/
+├── core/                           # Shared infrastructure
+│   ├── model/                      # Core models & utilities
+│   │   ├── network/                # HTTP client, error handling
+│   │   ├── storage/                # Local storage abstractions
+│   │   ├── validation/             # Form validation framework
+│   │   └── result.dart             # Result<T> pattern
+│   │
+│   ├── view/                       # Shared UI
+│   │   └── widgets/                # Global reusable widgets
+│   │
+│   ├── di/                         # Dependency injection
+│   │   └── service_locator.dart    # GetIt setup
+│   │
+│   ├── router.dart                 # App navigation (go_router)
+│   └── theme.dart                  # App theming
+│
+├── features/                       # All business features
+│   └── {feature_name}/             # Single feature
+│       ├── {feature_name}_di.dart  # Feature DI registration
+│       │
+│       ├── bloc/                   # ViewModel layer
+│       │   ├── {feature}_cubit.dart
+│       │   └── {feature}_state.dart
+│       │
+│       ├── model/                  # Model layer
+│       │   ├── data/               # DTOs and entities
+│       │   │   ├── {entity}.dart
+│       │   │   └── {entity}.g.dart
+│       │   │
+│       │   ├── repositories/       # Data access
+│       │   │   ├── {entity}_repository.dart
+│       │   │   └── {entity}_repository_impl.dart
+│       │   │
+│       │   └── usecases/           # Complex business logic (optional)
+│       │       └── {usecase}.dart
+│       │
+│       └── view/                   # View layer
+│           ├── {feature}_page.dart # Page (route)
+│           │
+│           ├── views/              # Composite sections
+│           │   ├── {section}_view.dart
+│           │   └── views.dart      # Barrel export
+│           │
+│           └── widgets/            # Feature widgets
+│               ├── {widget}.dart
+│               └── widgets.dart    # Barrel export
+│
+└── main.dart                       # App entry point
+```
+
+---
+
+## 🔄 Data Flow
+
+### Standard Flow (Read)
+```
+User Action (View)
+    ↓
+Cubit Method Call
+    ↓
+Repository Method
+    ↓
+Data Source (API/Database)
+    ↓
+Repository Returns Result<T>
+    ↓
+Cubit Emits New State
+    ↓
+View Rebuilds with New Data
+```
+
+### With UseCase (Complex Logic)
+```
+User Action (View)
+    ↓
+Cubit Method Call
+    ↓
+UseCase Execution
+    ↓
+Multiple Repository Calls
+    ↓
+Data Transformation/Validation
+    ↓
+UseCase Returns Result<T>
+    ↓
+Cubit Emits New State
+    ↓
+View Rebuilds
+```
+
+---
+
+## 🎯 When to Create UseCases
+
+### ✅ CREATE UseCases When:
+- Logic spans multiple repositories
+- Complex data transformations needed
+- Multi-step operations with validation
+- Reusable logic across multiple Cubits
+- Business rules require transaction-like behavior
+
+**Example**: `ProcessPaymentUseCase` that:
+1. Validates payment details
+2. Calls payment gateway
+3. Updates order status
+4. Sends confirmation email
+5. Updates user credits
+
+### ❌ SKIP UseCases When:
+- Simple CRUD operations (getAll, getById, create, update, delete)
+- Direct repository pass-through with no logic
+- Feature-specific logic only used once
+
+**Example**: Just call `repository.getUsers()` directly from Cubit
+
+---
+
+## 🔌 Dependency Injection Philosophy
+
+### Core Principle
+**Inversion of Control**: Classes receive their dependencies rather than creating them.
+
+### Pattern
+```dart
+// ✅ Dependencies injected via constructor
+class FeatureCubit extends Cubit<FeatureState> {
+  final FeatureRepository _repository;
+  final AnalyticsService _analytics;
+  
+  FeatureCubit(this._repository, this._analytics) 
+      : super(const FeatureState.initial());
+}
+
+// ❌ DON'T create dependencies internally
+class BadCubit extends Cubit<State> {
+  final repository = FeatureRepositoryImpl(); // ❌ Hard-coded dependency
+}
+```
+
+### Registration Types
+- **Singleton** (`registerLazySingleton`): One instance for app lifetime
+  - Use for: Services, repositories, network clients
+  
+- **Factory** (`registerFactory`): New instance each time
+  - Use for: Cubits, ViewModels, UseCases
+
+---
+
+## 🚫 Architecture Violations
+
+### ❌ FORBIDDEN Patterns
+
+1. **Business Logic in Views**
+```dart
+// ❌ WRONG
+class UserPage extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final users = getUsers(); // ❌ Data access in UI
+    final filtered = users.where((u) => u.isActive); // ❌ Logic in UI
+    return ListView(...);
+  }
+}
+```
+
+2. **Direct API Calls from Cubits**
+```dart
+// ❌ WRONG
+class UsersCubit extends Cubit<UsersState> {
+  Future<void> loadUsers() async {
+    final response = await http.get('/users'); // ❌ Direct API call
+  }
+}
+```
+
+3. **Repository Inside Repository**
+```dart
+// ❌ WRONG
+class UserRepositoryImpl implements UserRepository {
+  final PostRepository _postRepo; // ❌ Repo depends on repo
+}
+```
+
+4. **Cubit Inside Cubit**
+```dart
+// ❌ WRONG
+class UsersCubit extends Cubit<UsersState> {
+  final PostsCubit _postsCubit; // ❌ Cubit depends on cubit
+}
+
+// ✅ CORRECT: Listen to another Cubit's state
+class UsersCubit extends Cubit<UsersState> {
+  StreamSubscription? _postsSubscription;
+  
+  void initialize(PostsCubit postsCubit) {
+    _postsSubscription = postsCubit.stream.listen((postsState) {
+      // React to posts state changes
+      if (postsState.hasNewPost) {
+        loadUsers();
+      }
+    });
+  }
+}
+```
+
+5. **Returning Async Results from Cubit Methods**
+```dart
+// ❌ WRONG: Returning results instead of emitting state
+class UsersCubit extends Cubit<UsersState> {
+  Future<User?> getUser(String id) async { // ❌ Returns data
+    return await _repository.getUser(id);
+  }
+}
+
+// ✅ CORRECT: Emit state changes
+class UsersCubit extends Cubit<UsersState> {
+  Future<void> loadUser(String id) async { // ✅ Returns void
+    emit(state.copyWith(isLoading: true));
+    final result = await _repository.getUser(id);
+    switch (result) {
+      case Success(:final data):
+        emit(state.copyWith(user: data, isLoading: false));
+      case Failure(:final message):
+        emit(state.copyWith(error: message, isLoading: false));
+    }
+  }
+}
+```
+
+6. **God Classes/Files**
+```dart
+// ❌ WRONG: 2000+ line file with everything
+class MegaService {
+  void doEverything() { ... }
+}
+```
+
+---
+
+## ✅ Required Patterns
+
+### 1. Repository Pattern
+```dart
+// Abstract contract
+abstract class UserRepository {
+  Future<Result<List<User>>> getUsers();
+  Future<Result<User>> getUser(String id);
+}
+
+// Implementation
+class UserRepositoryImpl implements UserRepository {
+  final NetworkService _network;
+  
+  UserRepositoryImpl(this._network);
+  
+  @override
+  Future<Result<List<User>>> getUsers() async {
+    // Implementation
+  }
+}
+```
+
+### 2. UseCase Pattern (When Needed)
+```dart
+class ProcessCheckoutUseCase {
+  final OrderRepository _orderRepo;
+  final PaymentRepository _paymentRepo;
+  final NotificationRepository _notificationRepo;
+  
+  ProcessCheckoutUseCase(
+    this._orderRepo,
+    this._paymentRepo,
+    this._notificationRepo,
+  );
+  
+  Future<Result<Order>> execute(CheckoutRequest request) async {
+    // Multi-step business logic
+  }
+}
+```
+
+### 3. State Management with Cubit
+```dart
+class UsersCubit extends Cubit<UsersState> {
+  final UserRepository _repository;
+  
+  UsersCubit(this._repository) : super(const UsersState.initial());
+  
+  Future<void> loadUsers() async {
+    emit(state.copyWith(isLoading: true));
+    // Repository call and state emission
+  }
+}
+```
+
+### 4. Error Handling with Mixin
+```dart
+mixin ErrorHandlingMixin<T> on Cubit<T> {
+  void handleError(String message) {
+    toastification.show(
+      context: navigatorKey.currentContext!,
+      type: ToastificationType.error,
+      title: Text(message),
+    );
+  }
+}
+```
+
+---
+
+## 📚 Architecture Principles Summary
+
+### Single Responsibility
+- Each class has ONE reason to change
+- Each file contains ONE main concept
+
+### Dependency Inversion
+- Depend on abstractions (interfaces), not implementations
+- High-level modules don't depend on low-level modules
+
+### Separation of Concerns
+- View handles presentation
+- ViewModel handles state and coordination
+- Model handles data and business logic
+
+### Testability
+- All dependencies are injectable
+- All layers can be tested independently
+- Mock implementations for testing
+
+---
+
+## 🎓 Key Takeaways
+
+1. **Feature-First** folder structure for scalability
+2. **MVVM** for clear separation of concerns
+3. **Repository Pattern** for data access abstraction
+4. **Cubit** for state management (Bloc only when needed)
+5. **Dependency Injection** for loose coupling
+6. **UseCases** only for complex multi-step operations
+7. **Result<T>** for consistent error handling
+8. **Atomic Design** for UI component hierarchy
+
+---
+
+This architecture ensures:
+- ✅ Maintainability
+- ✅ Testability
+- ✅ Scalability
+- ✅ Team collaboration
+- ✅ Code reusability
+
+Follow these principles strictly for all features.

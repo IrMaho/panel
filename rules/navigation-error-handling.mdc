@@ -1,0 +1,199 @@
+# 🗺️ Navigation & Error Handling
+
+## 📍 Navigation with go_router
+
+### Setup
+
+```dart
+// core/router.dart
+import 'package:go_router/go_router.dart';
+
+final router = GoRouter(
+  initialLocation: '/',
+  routes: [
+    GoRoute(
+      path: '/',
+      builder: (context, state) => const HomePage(),
+    ),
+    GoRoute(
+      path: '/users',
+      builder: (context, state) => const UsersPage(),
+      routes: [
+        GoRoute(
+          path: ':id',
+          builder: (context, state) {
+            final id = state.pathParameters['id']!;
+            return BlocProvider(
+              create: (context) => getIt<UserDetailCubit>()..loadUser(id),
+              child: const UserDetailPage(),
+            );
+          },
+        ),
+      ],
+    ),
+  ],
+);
+
+// main.dart
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp.router(
+      routerConfig: router,
+    );
+  }
+}
+```
+
+### Usage
+
+```dart
+// Navigate
+context.go('/users');
+context.push('/users/123');
+context.pop();
+
+// With query parameters
+context.go('/users?filter=active');
+
+// Replace
+context.replace('/login');
+```
+
+---
+
+## 🚨 Error Handling
+
+### Result Pattern
+
+```dart
+// core/model/result.dart
+sealed class Result<T> {
+  const Result();
+}
+
+final class Success<T> extends Result<T> {
+  final T data;
+  const Success(this.data);
+}
+
+final class Failure<T> extends Result<T> {
+  final String message;
+  final Exception? exception;
+  const Failure(this.message, [this.exception]);
+}
+```
+
+### Error Mixin
+
+```dart
+// core/bloc/error_handling_mixin.dart
+import 'package:toastification/toastification.dart';
+
+mixin ErrorHandlingMixin<T> on Cubit<T> {
+  void handleError(String message) {
+    toastification.show(
+      context: navigatorKey.currentContext!,
+      type: ToastificationType.error,
+      title: Text(message),
+      autoCloseDuration: const Duration(seconds: 3),
+    );
+  }
+  
+  void showSuccess(String message) {
+    toastification.show(
+      context: navigatorKey.currentContext!,
+      type: ToastificationType.success,
+      title: Text(message),
+      autoCloseDuration: const Duration(seconds: 2),
+    );
+  }
+}
+```
+
+### Network Exceptions
+
+```dart
+// core/model/network/network_exception.dart
+enum NetworkExceptionType {
+  timeout,
+  serverError,
+  unauthorized,
+  notFound,
+  unknown,
+}
+
+class NetworkException implements Exception {
+  final String message;
+  final int? statusCode;
+  final NetworkExceptionType type;
+  
+  const NetworkException({
+    required this.message,
+    this.statusCode,
+    this.type = NetworkExceptionType.unknown,
+  });
+}
+```
+
+### Usage in Repository
+
+```dart
+class UserRepositoryImpl implements UserRepository {
+  @override
+  Future<Result<List<User>>> getUsers() async {
+    try {
+      final response = await _networkService.get('/users');
+      final users = (response.data as List)
+          .map((json) => User.fromJson(json))
+          .toList();
+      return Success(users);
+    } on NetworkException catch (e) {
+      return Failure(e.message);
+    } catch (e) {
+      return Failure('Unexpected error: ${e.toString()}');
+    }
+  }
+}
+```
+
+### Usage in Cubit
+
+```dart
+class UsersCubit extends Cubit<UsersState> with ErrorHandlingMixin {
+  Future<void> loadUsers() async {
+    emit(state.copyWith(isLoading: true));
+    
+    final result = await _repository.getUsers();
+    
+    switch (result) {
+      case Success(:final data):
+        emit(state.copyWith(users: data, isLoading: false));
+      case Failure(:final message):
+        handleError(message);
+        emit(state.copyWith(isLoading: false));
+    }
+  }
+}
+```
+
+---
+
+## ✅ Quick Rules
+
+**Navigation**:
+- Use `go_router` for all routing
+- Pass IDs via path parameters
+- Setup BlocProvider in route builder
+- Use `context.go()` for navigation
+
+**Error Handling**:
+- Always return `Result<T>` from repositories
+- Never throw exceptions from repositories
+- Use `ErrorHandlingMixin` for toasts
+- Pattern match with switch on Result
+
+**Network**:
+- Catch `NetworkException` specifically
+- Provide meaningful error messages
+- Handle all exception types
