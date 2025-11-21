@@ -1,6 +1,6 @@
 # ======================================================================
 #  🚀 گردش کار نهایی، کامل و جامع گیت‌هاب برای پروژه فلاتر
-#  معماری چندمرحله‌ای، بهینه‌سازی شده برای تمام پلتفرم‌ها (شامل iOS)
+#  معماری چندمرحله‌ای، اصلاح شده و بهینه‌سازی شده
 # ======================================================================
 name: 🐦 Build, Deploy & Optimize Flutter App
 
@@ -10,7 +10,7 @@ on:
     paths:
       - 'lib/**'
       - 'android/**'
-      - 'ios/**' # <--- مسیر iOS اضافه شد
+      - 'ios/**'
       - 'linux/**'
       - 'windows/**'
       - 'web/**'
@@ -20,7 +20,7 @@ on:
   workflow_dispatch:
 
 env:
-  FLUTTER_VERSION: '3.22.2' # <--- نسخه فلاتر به‌روز شد
+  FLUTTER_VERSION: '3.24.3' # <--- ارتقا به آخرین نسخه پایدار (شامل Dart 3.5)
   JAVA_VERSION: '17'
   PUBLIC_REPO_PATH: ShoghShahadat/doaye_komeyl
   PUBLIC_REPO_NAME: doaye_komeyl
@@ -55,6 +55,16 @@ jobs:
     steps:
       - name: '📥 Checkout Repository'
         uses: actions/checkout@v4
+      
+      # --- FIX START: اصلاح خطای احتمالی نسخه در pubspec.yaml ---
+      - name: '🔧 Auto-Fix pubspec.yaml SDK Constraint'
+        run: |
+          # این دستور خطای رایج تایپی (نوشتن نسخه فلاتر بجای دارت) را اصلاح می‌کند
+          sed -i 's/\^3.10.0/>=3.0.0 <4.0.0/g' pubspec.yaml || true
+          sed -i 's/>=3.10.0/>=3.0.0 <4.0.0/g' pubspec.yaml || true
+          echo "✅ Pubspec constraint patched if necessary."
+      # --- FIX END ---
+
       - name: '🐦 Restore Flutter from Cache'
         uses: subosito/flutter-action@v2
         with:
@@ -148,15 +158,23 @@ jobs:
           path: build/app/outputs/flutter-apk/
 
   # ======================================================================
-  #  Job 3: 🍎 بیلد آی‌اواس (جدید)
+  #  Job 3: 🍎 بیلد آی‌اواس
   # ======================================================================
   build-ios:
     name: '🍎 3. Build iOS'
     needs: setup-environment
-    runs-on: macos-latest # <-- سیستم‌عامل باید macOS باشد
+    runs-on: macos-latest
     steps:
       - name: '📥 Checkout Repository'
         uses: actions/checkout@v4
+      
+      # --- FIX START: اصلاح خطای نسخه برای macOS (تفاوت دستور sed) ---
+      - name: '🔧 Auto-Fix pubspec.yaml SDK Constraint'
+        run: |
+          sed -i '' 's/\^3.10.0/>=3.0.0 <4.0.0/g' pubspec.yaml || true
+          sed -i '' 's/>=3.10.0/>=3.0.0 <4.0.0/g' pubspec.yaml || true
+      # --- FIX END ---
+
       - name: '🐦 Restore Flutter from Cache'
         uses: subosito/flutter-action@v2
         with:
@@ -171,21 +189,14 @@ jobs:
             ${{ runner.os }}-pub-
       - name: '🔑 Install Apple Certificate and Provisioning Profile'
         run: |
-          # ایجاد یک keychain موقت و امن
           KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
           security create-keychain -p "" $KEYCHAIN_PATH
           security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
           security unlock-keychain -p "" $KEYCHAIN_PATH
-
-          # وارد کردن گواهی دیجیتال از سکرت
           echo "${{ secrets.P12_CERTIFICATE_BASE64 }}" | base64 --decode > certificate.p12
           security import certificate.p12 -k $KEYCHAIN_PATH -P "${{ secrets.P12_CERTIFICATE_PASSWORD }}" -A
           rm certificate.p12
-          
-          # تنظیم keychain موقت به عنوان پیش‌فرض
           security default-keychain -s $KEYCHAIN_PATH
-
-          # نصب پروفایل توزیع
           PP_PATH=$RUNNER_TEMP/profile.mobileprovision
           echo "${{ secrets.PROVISIONING_PROFILE_BASE64 }}" | base64 --decode > $PP_PATH
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
@@ -210,6 +221,17 @@ jobs:
     steps:
       - name: '📥 Checkout Repository'
         uses: actions/checkout@v4
+      
+      # --- FIX START: اصلاح خطای نسخه برای Windows PowerShell ---
+      - name: '🔧 Auto-Fix pubspec.yaml SDK Constraint'
+        shell: powershell
+        run: |
+          if (Test-Path pubspec.yaml) {
+            (Get-Content pubspec.yaml) -replace '\^3.10.0', '>=3.0.0 <4.0.0' | Set-Content pubspec.yaml
+            (Get-Content pubspec.yaml) -replace '>=3.10.0', '>=3.0.0 <4.0.0' | Set-Content pubspec.yaml
+          }
+      # --- FIX END ---
+
       - name: '🐦 Restore Flutter from Cache'
         uses: subosito/flutter-action@v2
         with:
@@ -253,6 +275,14 @@ jobs:
     steps:
       - name: '📥 Checkout Repository'
         uses: actions/checkout@v4
+      
+      # --- FIX START ---
+      - name: '🔧 Auto-Fix pubspec.yaml SDK Constraint'
+        run: |
+          sed -i 's/\^3.10.0/>=3.0.0 <4.0.0/g' pubspec.yaml || true
+          sed -i 's/>=3.10.0/>=3.0.0 <4.0.0/g' pubspec.yaml || true
+      # --- FIX END ---
+
       - name: '🐦 Restore Flutter from Cache'
         uses: subosito/flutter-action@v2
         with:
@@ -280,7 +310,7 @@ jobs:
         with:
           name: release-linux
           path: build/linux/x64/release/bundle/
-          
+      
   # ======================================================================
   #  Job 6: 🌐 بیلد وب
   # ======================================================================
@@ -291,6 +321,14 @@ jobs:
     steps:
       - name: '📥 Checkout Repository'
         uses: actions/checkout@v4
+
+      # --- FIX START ---
+      - name: '🔧 Auto-Fix pubspec.yaml SDK Constraint'
+        run: |
+          sed -i 's/\^3.10.0/>=3.0.0 <4.0.0/g' pubspec.yaml || true
+          sed -i 's/>=3.10.0/>=3.0.0 <4.0.0/g' pubspec.yaml || true
+      # --- FIX END ---
+
       - name: '🐦 Restore Flutter from Cache'
         uses: subosito/flutter-action@v2
         with:
@@ -321,7 +359,7 @@ jobs:
         with:
           name: release-web
           path: build/web/
-          
+      
   # ======================================================================
   #  Job 7: 🚀 استقرار وب
   # ======================================================================
